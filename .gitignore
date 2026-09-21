@@ -1,0 +1,32 @@
+# Build outputs and release packages
+.build/
+*.apk
+*.zip
+apk-share/
+
+# Local toolchains and upstream research copies
+.tools/
+.research/
+
+# Signing material
+signing/
+*.jks
+*.keystore
+*.pem
+*.key
+
+# Local screenshots and archived packages
+截图文件/
+旧版扔这/
+
+# Runtime data
+config/
+logs/
+backups/
+runtime-*/
+
+# Python and OS metadata
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db

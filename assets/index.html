@@ -1,0 +1,1219 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>手机端值班室</title>
+  <style>
+    :root {
+      --bg: #07030d;
+      --surface: #140d1d;
+      --surface-2: #21132f;
+      --line: #3d2950;
+      --text: #fff8ff;
+      --muted: #b8a7c4;
+      --cyan: #d05cff;
+      --cyan-soft: #2a153b;
+      --orange: #ff65d7;
+      --green: #58d68d;
+      --red: #ff6b6b;
+      --yellow: #f6c85f;
+      --radius: 8px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+      padding: 14px 12px 40px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    .app-head { display: flex; align-items: center; gap: 10px; padding: 4px 2px 14px; }
+    .brand-mark {
+      width: 38px; height: 38px; border-radius: 0; display: grid; place-items: center;
+      background: #07030d url("galaxy-mark.png") center / 100% 100% no-repeat;
+      border: 1px solid #6c3289; box-shadow: inset 0 0 0 1px #12051bbb;
+      flex: 0 0 auto;
+    }
+    .brand-copy { min-width: 0; flex: 1; }
+    .brand-copy h1 { margin: 0; font-size: 20px; line-height: 1.15; letter-spacing: 0; }
+    .brand-copy p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+    .icon-button, .button {
+      border: 1px solid var(--line); background: var(--surface); border-radius: var(--radius);
+      min-height: 40px; padding: 0 12px; display: inline-flex; align-items: center;
+      justify-content: center; gap: 7px; cursor: pointer;
+    }
+    .icon-button { width: 40px; padding: 0; }
+    .button:active, .icon-button:active { transform: translateY(1px); background: var(--surface-2); }
+    .button.primary { background: var(--cyan); border-color: var(--cyan); color: #100416; font-weight: 800; }
+    .button.warn { background: #3c1236; border-color: #812d78; color: #ffd5f7; }
+    .button.danger { background: #3b2022; border-color: #6d3337; color: #ffc9cc; }
+    .button.ghost { background: transparent; }
+    .button.small { min-height: 34px; padding: 0 10px; font-size: 13px; }
+    .button:disabled { opacity: .45; cursor: not-allowed; }
+    svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+    .tabs {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+      background: #0d0713; border: 1px solid var(--line); border-radius: 10px; padding: 4px;
+      position: sticky; top: 0; z-index: 20;
+    }
+    .tab {
+      border: 0; background: transparent; color: var(--muted); border-radius: 7px;
+      min-height: 38px; font-weight: 700;
+    }
+    .tab.active { background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+    .panel { display: none; padding-top: 14px; }
+    .panel.active { display: block; }
+    .section { margin: 0 0 14px; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 8px; gap: 10px; }
+    .section-head h2 { margin: 0; font-size: 15px; letter-spacing: 0; }
+    .section-head .hint { color: var(--muted); font-size: 12px; text-align: right; }
+    .surface {
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .status-list { display: grid; }
+    .status-row {
+      min-height: 52px; padding: 10px 12px; display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .status-row:last-child { border-bottom: 0; }
+    .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: 0 0 auto; }
+    .status-dot.ok { background: var(--green); box-shadow: 0 0 0 3px #58d68d1f; }
+    .status-dot.bad { background: var(--red); box-shadow: 0 0 0 3px #ff6b6b1f; }
+    .status-dot.warn { background: var(--yellow); box-shadow: 0 0 0 3px #f6c85f1f; }
+    .status-main { flex: 1; min-width: 0; }
+    .status-main strong { display: block; font-size: 14px; }
+    .status-main span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status-action { flex: 0 0 auto; }
+    .action-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .action-grid .button { width: 100%; }
+    .component-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+    .component-card { padding: 12px; }
+    .component-top { display: flex; align-items: flex-start; gap: 10px; }
+    .component-title { flex: 1; min-width: 0; }
+    .component-title strong { display: block; font-size: 15px; }
+    .component-title span { color: var(--muted); font-size: 12px; display: block; margin-top: 3px; }
+    .component-title .runtime-state { color: #e5d7ee; white-space: normal; }
+    .pill {
+      min-height: 25px; display: inline-flex; align-items: center; padding: 0 9px;
+      border-radius: 999px; font-size: 12px; color: var(--muted); background: var(--surface-2);
+      border: 1px solid var(--line); white-space: nowrap;
+    }
+    .pill.ok { color: #b6f2d3; background: #173326; border-color: #285c40; }
+    .pill.bad { color: #ffc7c7; background: #371d20; border-color: #6b3035; }
+    .pill.warn { color: #ffe8ad; background: #372d17; border-color: #6b572c; }
+    .component-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 11px; }
+    .component-actions.two { grid-template-columns: repeat(2, 1fr); }
+    .component-actions.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .component-actions .button { width: 100%; }
+
+    .field-grid { display: grid; gap: 10px; padding: 12px; }
+    .field label { display: block; font-size: 12px; color: var(--muted); margin: 0 0 5px 1px; }
+    .field input, .field select {
+      width: 100%; min-height: 42px; border-radius: var(--radius); border: 1px solid var(--line);
+      background: #0d0713; color: var(--text); padding: 0 11px; outline: none;
+    }
+    .field input:focus, .field select:focus { border-color: var(--cyan); }
+    .field-help { font-size: 11px; color: var(--muted); margin: 5px 2px 0; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .empty { padding: 24px 16px; text-align: center; color: var(--muted); font-size: 13px; }
+    .instance-item { padding: 12px; border-bottom: 1px solid var(--line); }
+    .instance-item:last-child { border-bottom: 0; }
+    .instance-head { display: flex; align-items: center; gap: 9px; }
+    .instance-copy { flex: 1; min-width: 0; }
+    .instance-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .instance-copy span { display: block; color: var(--muted); font-size: 12px; margin-top: 3px; }
+    .instance-actions { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+    .instance-actions .button.small { padding: 0 6px; font-size: 12px; }
+    .instance-actions .button { width: 100%; }
+
+    .backup-list { display: grid; }
+    .backup-item { padding: 11px 12px; display: flex; gap: 10px; align-items: center; border-bottom: 1px solid var(--line); }
+    .backup-item:last-child { border-bottom: 0; }
+    .backup-info { flex: 1; min-width: 0; }
+    .backup-info strong { display: block; font-size: 13px; word-break: break-all; }
+    .backup-info span { color: var(--muted); font-size: 12px; }
+    .config-grid { display: grid; grid-template-columns: 120px 1fr; font-size: 13px; }
+    .config-grid > div { padding: 9px 11px; border-bottom: 1px solid var(--line); }
+    .config-grid > div:nth-last-child(-n+2) { border-bottom: 0; }
+    .config-grid .key { color: var(--muted); }
+    .config-grid .value { word-break: break-all; }
+    .warning { padding: 11px 12px; background: #271430; border: 1px solid #65417d; color: #f2d7ff; border-radius: var(--radius); font-size: 13px; line-height: 1.5; }
+    .activity { padding: 12px; color: var(--muted); font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+    .activity strong { color: var(--text); }
+    .footer { color: #667586; text-align: center; font-size: 11px; margin-top: 18px; }
+
+    .toast {
+      position: fixed; left: 16px; right: 16px; bottom: 18px; z-index: 99;
+      background: #f8efff; color: #100416; border-radius: 8px; padding: 12px 14px;
+      font-size: 13px; box-shadow: 0 12px 35px #0008; transform: translateY(120%);
+      transition: transform .18s ease; pointer-events: none;
+    }
+    .toast.show { transform: translateY(0); }
+    @media (min-width: 700px) {
+      body { max-width: 820px; margin: 0 auto; }
+      .component-grid { grid-template-columns: repeat(3, 1fr); }
+      .action-grid { grid-template-columns: repeat(4, 1fr); }
+      .field-grid { grid-template-columns: 1.1fr .7fr .7fr auto; align-items: end; }
+      .field-grid .field-help { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-head">
+    <div class="brand-mark" aria-hidden="true"></div>
+    <div class="brand-copy">
+      <h1>手机端值班室</h1>
+      <p id="subtitle">正在读取运行环境</p>
+    </div>
+    <button class="icon-button" id="open-terminal" title="打开终端" aria-label="打开终端">
+      <svg viewBox="0 0 24 24"><path d="M4 17l6-5-6-5"/><path d="M12 19h8"/></svg>
+    </button>
+  </header>
+
+  <nav class="tabs" aria-label="功能">
+    <button class="tab active" data-panel="home">总览</button>
+    <button class="tab" data-panel="instances">实例</button>
+    <button class="tab" data-panel="backup">备份</button>
+    <button class="tab" data-panel="activity">动态</button>
+  </nav>
+
+  <main>
+    <section class="panel active" id="panel-home">
+      <div class="section">
+        <div class="section-head"><h2>运行条件</h2><span class="hint">点状态行右侧修复</span></div>
+        <div class="surface status-list" id="environment-list"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>组件</h2><span class="hint">独立会话运行</span></div>
+        <div class="component-grid">
+          <article class="surface component-card">
+            <div class="component-top">
+              <div class="component-title"><strong>NapCat QQ</strong><span>v4.18.28 · WebUI 6099</span><span class="runtime-state" id="napcat-runtime">正在检查安装状态</span></div>
+              <span class="pill" id="napcat-status">检查中</span>
+            </div>
+            <div class="component-actions">
+              <button class="button small" data-action="deploy-napcat" data-label="部署或更新 NapCat">部署/更新</button>
+              <button class="button small primary" data-action="start-napcat" data-label="启动 NapCat">启动</button>
+              <button class="button small danger" data-action="stop-napcat" data-label="停止 NapCat">停止</button>
+            </div>
+            <div class="component-actions four" style="margin-top:7px">
+              <button class="button small" id="napcat-webui" title="打开 NapCat WebUI">WebUI</button>
+              <button class="button small" id="napcat-token" title="读取 NapCat WebUI 密钥">密钥</button>
+              <button class="button small" id="napcat-ws-config" title="配置 NapCat 反向 WebSocket">连接</button>
+              <button class="button small danger" id="uninstall-napcat" title="卸载当前 NapCat 版本">卸载</button>
+            </div>
+          </article>
+
+          <article class="surface component-card">
+            <div class="component-top">
+              <div class="component-title"><strong>MiniLM 向量服务</strong><span>本地 8000 · 384 维</span><span class="runtime-state" id="minilm-runtime">正在检查安装状态</span></div>
+              <span class="pill" id="minilm-status">检查中</span>
+            </div>
+            <div class="component-actions">
+              <button class="button small" data-action="deploy-minilm" data-label="部署 MiniLM">部署</button>
+              <button class="button small primary" data-action="start-minilm" data-label="启动 MiniLM">启动</button>
+              <button class="button small danger" data-action="stop-minilm" data-label="停止 MiniLM">停止</button>
+            </div>
+            <div class="component-actions two" style="margin-top:7px">
+              <button class="button small" id="minilm-test">测试接口</button>
+              <button class="button small" data-action="minilm-config" data-label="查看 MiniLM 配置">查看配置</button>
+            </div>
+          </article>
+
+          <article class="surface component-card">
+            <div class="component-top">
+              <div class="component-title"><strong>AstrBot 运行底座</strong><span>v4.27.3 · Python 3.12</span><span class="runtime-state" id="astrbot-runtime">正在检查安装状态</span></div>
+              <span class="pill" id="astrbot-status">按需部署</span>
+            </div>
+            <div class="component-actions">
+              <button class="button small" data-action="deploy-astrbot" data-label="部署或更新 AstrBot">部署/更新</button>
+              <button class="button small warn" data-action="stop-all" data-label="停止全部服务">全部停止</button>
+              <button class="button small danger" id="uninstall-astrbot" title="卸载当前 AstrBot 运行底座">卸载底座</button>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>环境操作</h2></div>
+        <div class="action-grid">
+          <button class="button" data-action="bootstrap" data-label="初始化终端环境">
+            <svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>一键初始化
+          </button>
+          <button class="button" id="fix-terminal">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>终端权限
+          </button>
+          <button class="button" id="storage-permission">
+            <svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 11v6"/><path d="M9 14h6"/></svg>目录授权
+          </button>
+          <button class="button" id="battery-permission">
+            <svg viewBox="0 0 24 24"><rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10v4"/><path d="M7 10v4"/><path d="M11 10v4"/></svg>后台保活
+          </button>
+          <button class="button warn" id="cleanup-cache">
+            <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>停服务并清缓存
+          </button>
+        </div>
+        <div class="surface status-list" id="environment-action-status" style="margin-top:10px"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-instances">
+      <div class="section">
+        <div class="section-head"><h2>新建 AstrBot 实例</h2><span class="hint">创建后再配置</span></div>
+        <div class="surface">
+          <div class="field-grid" style="grid-template-columns:minmax(0,1fr) auto">
+            <div class="field">
+              <label for="instance-name">名称</label>
+              <input id="instance-name" maxlength="32" placeholder="例如：石英块块块块儿">
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="button primary" id="create-instance" style="width:100%">创建实例</button>
+            </div>
+          </div>
+          <div class="field-help" style="padding:0 12px 12px">创建后点实例里的“配置”，单独填写后台用户名、密码和端口。</div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-head"><h2>实例管理</h2><button class="button small ghost" id="refresh-instances">刷新</button></div>
+        <div class="surface" id="instance-list"><div class="empty">暂无实例</div></div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-backup">
+      <div class="section">
+        <div class="section-head"><h2>备份来源</h2><button class="button small ghost" id="refresh-backups">刷新</button></div>
+        <div class="surface">
+          <div class="field-grid" style="grid-template-columns:1fr">
+            <div class="field">
+              <label for="backup-folder">手机内部存储文件夹</label>
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px">
+                <input id="backup-folder" readonly value="">
+                <button class="button small" id="choose-backup-folder">选择文件夹</button>
+              </div>
+              <div class="field-help">点击选择保存备份的文件夹；仅列出 ZIP，导入过程会显示在 ZeroTermux 会话中。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-head"><h2>选择备份包</h2><span class="hint">导入会覆盖实例数据</span></div>
+        <div class="surface" id="backup-list"><div class="empty">正在读取文件夹</div></div>
+      </div>
+      <div class="section">
+        <div class="warning">导入完成后，所选 AstrBot 实例会被自动停止。确认数据完全写入后，等待你手动重启。</div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-activity">
+      <div class="section">
+        <div class="section-head"><h2>操作记录</h2><button class="button small ghost" id="clear-activity">清空</button></div>
+        <div class="surface"><div class="activity" id="activity-log" data-empty="1"><strong>还没有操作。</strong></div></div>
+      </div>
+      <div class="section">
+        <div class="section-head"><h2>MiniLM 对接参数</h2></div>
+        <div class="surface config-grid">
+          <div class="key">ID</div><div class="value">local_minilm_embedding</div>
+          <div class="key">API Key</div><div class="value">local-minilm</div>
+          <div class="key">API Base URL</div><div class="value">http://127.0.0.1:8000/v1</div>
+          <div class="key">嵌入模型</div><div class="value">paraphrase-multilingual-MiniLM-L12-v2</div>
+          <div class="key">嵌入维度</div><div class="value">384</div>
+          <div class="key">维度模式</div><div class="value">always</div>
+          <div class="key">超时时间</div><div class="value">60 秒</div>
+          <div class="key">代理地址</div><div class="value">留空</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="footer">AstrBot v4.27.3 · NapCat v4.18.28 · ZeroTermux</div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+    const state = { instances: [], busy: false, runtimes: {}, tasks: {}, environment: {} };
+    let toastTimer;
+
+    function parse(value, fallback = {}) {
+      try { return JSON.parse(value); } catch (_) { return fallback; }
+    }
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+    function formatBytes(bytes) {
+      if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return (bytes / Math.pow(1024, index)).toFixed(index > 1 ? 1 : 0) + " " + units[index];
+    }
+    function showToast(message) {
+      const toast = $("#toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 2400);
+    }
+    function record(message) {
+      const log = $("#activity-log");
+      const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+      const line = document.createElement("div");
+      line.innerHTML = `<strong>${time}</strong>  ${escapeHtml(message)}`;
+      if (log.dataset.empty === "1") { log.innerHTML = ""; log.dataset.empty = "0"; }
+      log.prepend(line);
+    }
+    function invoke(name, ...args) {
+      if (!window.Android || typeof Android[name] !== "function") {
+        showToast("应用桥接未就绪");
+        return null;
+      }
+      try { return Android[name](...args); }
+      catch (error) { showToast(String(error)); return null; }
+    }
+    function storageOk(env) {
+      return Boolean(env.storage && (
+        env.storage.folderGranted || env.storage.allFiles || env.storage.legacyWrite));
+    }
+    function statusRow(id, title, detail, ok, actionText = "", action = "") {
+      const row = document.createElement("div");
+      row.className = "status-row";
+      row.innerHTML = `
+        <span class="status-dot ${ok ? "ok" : (detail === "进行中" ? "warn" : "bad")}"></span>
+        <div class="status-main"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(detail)}</span></div>
+        ${actionText ? `<button class="button small status-action" data-env-action="${escapeHtml(action)}">${escapeHtml(actionText)}</button>` : ""}`;
+      return row;
+    }
+    function renderEnvironmentActions() {
+      const root = $("#environment-action-status");
+      if (!root) return;
+      const env = state.environment || {};
+      root.innerHTML = "";
+      const bootstrap = state.tasks.bootstrap || {};
+      const bootstrapDone = Boolean(env.environmentReady);
+      const bootstrapRunning = bootstrap.state === "running";
+      root.append(statusRow(
+        "bootstrap_status",
+        "一键初始化",
+        bootstrapRunning ? "进行中" : (bootstrapDone ? "已完成" : "未完成"),
+        bootstrapDone,
+        "",
+        ""));
+      root.append(statusRow(
+        "terminal_status",
+        "终端调用权限",
+        env.termuxCommand ? "已完成" : "未完成",
+        Boolean(env.termuxCommand)));
+      root.append(statusRow(
+        "storage_status",
+        "目录授权",
+        storageOk(env) ? "已完成" : "未完成",
+        storageOk(env)));
+      root.append(statusRow(
+        "battery_status",
+        "后台保活",
+        env.batteryIgnored ? "已完成" : "未完成",
+        Boolean(env.batteryIgnored)));
+      const cleanup = state.tasks.cleanup || {};
+      root.append(statusRow(
+        "cleanup_status",
+        "残留清理",
+        cleanup.state === "running"
+          ? "进行中"
+          : (cleanup.state === "success" ? "已完成" : "未清理"),
+        cleanup.state === "success"));
+    }
+    async function refreshEnvironment() {
+      const env = parse(invoke("environment"), {});
+      state.environment = env;
+      const list = $("#environment-list");
+      list.innerHTML = "";
+      const termux = Boolean(env.termuxInstalled);
+      list.append(statusRow("termux", "ZeroTermux", termux ? "已安装 com.termux" : "未检测到 ZeroTermux", termux, termux ? "" : "安装"));
+      const overlay = Boolean(env.termuxOverlay);
+      list.append(statusRow("termux_overlay", "终端自动切回", overlay ? "已允许 ZeroTermux 显示在其他应用上层" : "请在 ZeroTermux 应用信息中允许悬浮窗", overlay, overlay ? "" : "去设置"));
+      const termuxCommand = Boolean(env.termuxCommand);
+      const termuxPermission = env.termuxPermission || {};
+      const permissionDetail = termuxCommand
+        ? "运行权限已允许，可以启动终端会话"
+        : termuxPermission.declared === false
+          ? termux
+            ? "ZeroTermux 未声明 RUN_COMMAND 权限"
+            : "请先安装 ZeroTermux"
+          : termuxPermission.protection && termuxPermission.protection !== "dangerous"
+            ? `ZeroTermux 权限类型为 ${termuxPermission.protection}，无法弹窗授权`
+            : "点击后由 Android 弹出运行权限确认";
+      list.append(statusRow("termux_command", "终端调用授权", permissionDetail, termuxCommand, termuxCommand ? "" : "授权"));
+      const files = storageOk(env);
+      list.append(statusRow("files", "部署文件夹", files ? (env.storage.publicRoot || "已授权") : "请选择手机内部存储中的“手机端值班室”文件夹", files, files ? "" : "选择"));
+      if ($("#backup-folder") && env.storage && env.storage.backupRoot) {
+        $("#backup-folder").value = env.storage.backupRoot;
+      }
+      const edge = Boolean(env.edgeInstalled);
+      list.append(statusRow("edge", "Microsoft Edge", edge ? "WebUI 将指定 Edge 打开" : "未检测到 Edge，将回退系统浏览器", edge, edge ? "" : "检查"));
+      const battery = Boolean(env.batteryIgnored);
+      list.append(statusRow("battery", "后台保活", battery ? "已忽略电池优化" : "建议允许后台持续运行", battery, battery ? "" : "设置"));
+      $("#subtitle").textContent = termux && files ? "终端与存储已就绪" : "先完成运行条件检查";
+      renderEnvironmentActions();
+      return env;
+    }
+    async function refreshPorts() {
+      const napcat = invoke("portOpen", 6099);
+      const minilm = invoke("portOpen", 8000);
+      const list = state.instances || [];
+      let running = 0;
+      for (const instance of list) {
+        instance.running = Boolean(invoke("portOpen", Number(instance.port)));
+        if (instance.running) running += 1;
+      }
+      const runtimes = parse(invoke("loadRuntimeStates"), {});
+      state.runtimes = runtimes;
+      setRuntimeDetail("#napcat-runtime", runtimes.napcat || {}, "尚未完成部署");
+      setRuntimeDetail("#minilm-runtime", runtimes.minilm || {}, "尚未完成部署");
+      setRuntimeDetail("#astrbot-runtime", runtimes.astrbot || {}, "尚未完成部署");
+      setComponentPill("#napcat-status", runtimes.napcat || {}, napcat, state.tasks.napcat);
+      setComponentPill("#minilm-status", runtimes.minilm || {}, minilm, state.tasks.minilm);
+      const astrbotInstalled = runtimeInstalled(runtimes.astrbot);
+      const astrbotPill = $("#astrbot-status");
+      if (astrbotPill) {
+        const busy = state.tasks.astrbot && state.tasks.astrbot.state === "running";
+        astrbotPill.textContent = busy
+          ? `底座执行中 · ${list.length} 实例`
+          : `${astrbotInstalled ? "底座已装" : "底座未装"} · ${list.length} 实例 · ${running} 运行`;
+        astrbotPill.className = "pill " + (busy ? "warn" : (astrbotInstalled ? (running > 0 ? "ok" : "warn") : "bad"));
+      }
+      renderInstances();
+    }
+    function setPill(selector, ok, text) {
+      const el = $(selector);
+      if (!el) return;
+      el.textContent = text;
+      el.className = "pill " + (ok ? "ok" : "bad");
+    }
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    function componentForAction(action) {
+      if (String(action).includes("napcat")) return "napcat";
+      if (String(action).includes("minilm")) return "minilm";
+      if (String(action).includes("astrbot")) return "astrbot";
+      if (String(action) === "bootstrap") return "bootstrap";
+      if (String(action) === "cleanup") return "cleanup";
+      return "";
+    }
+    function runtimeInstalled(runtime) {
+      return Boolean(runtime && (runtime.version || runtime.updatedAt));
+    }
+    function runtimeDetail(runtime, fallback) {
+      if (!runtimeInstalled(runtime)) return fallback || "尚未完成部署";
+      const version = runtime.version ? ` ${runtime.version}` : "";
+      const qqKernel = runtime.qqKernel ? ` · QQ 内核 ${runtime.qqKernel}` : "";
+      let updated = "";
+      if (runtime.updatedAt) {
+        const parsed = new Date(runtime.updatedAt);
+        if (!Number.isNaN(parsed.getTime())) {
+          updated = ` · ${parsed.toLocaleString("zh-CN", { hour12: false })}`;
+        }
+      }
+      return `已安装${version}${qqKernel}${updated}`;
+    }
+    function setRuntimeDetail(selector, runtime, fallback) {
+      const el = $(selector);
+      if (el) el.textContent = runtimeDetail(runtime, fallback);
+    }
+    function setComponentPill(selector, runtime, running, task) {
+      const el = $(selector);
+      if (!el) return;
+      if (task && task.state === "running") {
+        el.textContent = "执行中";
+        el.className = "pill warn";
+      } else if (runtimeInstalled(runtime) && running) {
+        el.textContent = "运行中";
+        el.className = "pill ok";
+      } else if (runtimeInstalled(runtime)) {
+        el.textContent = "已安装";
+        el.className = "pill warn";
+      } else {
+        el.textContent = "未安装";
+        el.className = "pill bad";
+      }
+    }
+    function refreshRuntimeStates() {
+      const runtimes = parse(invoke("loadRuntimeStates"), {});
+      state.runtimes = runtimes;
+      setRuntimeDetail("#napcat-runtime", runtimes.napcat || {}, "尚未完成部署");
+      setRuntimeDetail("#minilm-runtime", runtimes.minilm || {}, "尚未完成部署");
+      setRuntimeDetail("#astrbot-runtime", runtimes.astrbot || {}, "尚未完成部署");
+      setComponentPill("#napcat-status", runtimes.napcat || {}, invoke("portOpen", 6099), state.tasks.napcat);
+      setComponentPill("#minilm-status", runtimes.minilm || {}, invoke("portOpen", 8000), state.tasks.minilm);
+      const list = state.instances || [];
+      const running = list.filter(instance => instance.running).length;
+      const pill = $("#astrbot-status");
+      if (pill) {
+        const installed = runtimeInstalled(runtimes.astrbot);
+        const busy = state.tasks.astrbot && state.tasks.astrbot.state === "running";
+        pill.textContent = busy
+          ? `底座执行中 · ${list.length} 实例`
+          : `${installed ? "底座已装" : "底座未装"} · ${list.length} 实例 · ${running} 运行`;
+        pill.className = "pill " + (busy ? "warn" : (installed ? (running > 0 ? "ok" : "warn") : "bad"));
+      }
+      return runtimes;
+    }
+    function normalizeInstance(instance) {
+      const normalized = { ...instance };
+      normalized.username = String(instance.username || "astrbot");
+      normalized.password = String(instance.password ?? instance.token ?? "");
+      normalized.credentialsConfirmed = Boolean(instance.credentialsConfirmed);
+      const port = Number(instance.port);
+      normalized.port = Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : 0;
+      delete normalized.token;
+      return normalized;
+    }
+    function instancePort(instance) {
+      const port = Number(instance.port);
+      return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : 0;
+    }
+    function instanceCredentialsReady(instance) {
+      return Boolean(
+        instance.credentialsConfirmed &&
+        String(instance.username || "").trim() &&
+        String(instance.password || ""));
+    }
+    function loadInstances() {
+      const raw = invoke("loadInstances") || "{\"instances\":[]}";
+      const data = parse(raw, { instances: [] });
+      state.instances = Array.isArray(data.instances)
+        ? data.instances.map(normalizeInstance)
+        : [];
+      renderInstances();
+    }
+    function saveInstances() {
+      invoke("saveInstances", JSON.stringify({ instances: state.instances }));
+    }
+    function renderInstances() {
+      const root = $("#instance-list");
+      if (!state.instances.length) {
+        root.innerHTML = '<div class="empty">暂无实例</div>';
+        return;
+      }
+      root.innerHTML = state.instances.map((instance, index) => {
+        const port = instancePort(instance);
+        const credentials = instanceCredentialsReady(instance);
+        const pillText = instance.running
+          ? "运行中"
+          : (!port
+            ? "待配置端口"
+            : (!instance.credentialsConfirmed ? "待确认账密" : (!credentials ? "待记录账密" : "已停止")));
+        const pillClass = instance.running ? "ok" : (port && !credentials ? "warn" : "bad");
+        const detail = port ? `端口 ${port}` : "端口未配置";
+        const account = !instance.credentialsConfirmed
+          ? "账密待确认"
+          : (credentials ? "账密已记录" : "账密待记录");
+        return `
+          <article class="instance-item">
+            <div class="instance-head">
+              <span class="status-dot ${instance.running ? "ok" : ""}"></span>
+              <div class="instance-copy">
+                <strong>${escapeHtml(instance.name)}</strong>
+                <span>${detail} · ${account} · ${instance.running ? "运行中" : "已停止"} · ${escapeHtml(instance.id)}</span>
+              </div>
+              <span class="pill ${pillClass}">${pillText}</span>
+            </div>
+            <div class="instance-actions">
+              <button class="button small" data-instance-action="config" data-index="${index}">配置</button>
+              <button class="button small primary" data-instance-action="start" data-index="${index}">启动</button>
+              <button class="button small danger" data-instance-action="stop" data-index="${index}">停止</button>
+              <button class="button small" data-instance-action="web" data-index="${index}">WebUI</button>
+              <button class="button small ghost" data-instance-action="delete" data-index="${index}">删除</button>
+            </div>
+          </article>`;
+      }).join("");
+    }
+    function openInstanceConfig(instance) {
+      const dialog = document.createElement("div");
+      dialog.style.cssText = "position:fixed;inset:0;background:#000d;z-index:85;display:grid;place-items:center;padding:18px";
+      dialog.innerHTML = `
+        <div style="width:100%;max-width:460px;background:#151b23;border:1px solid #2c3644;border-radius:10px;padding:16px">
+          <h3 style="margin:0 0 5px;font-size:18px">实例配置</h3>
+          <p style="margin:0 0 14px;color:#93a1b2;font-size:12px">先启动一次并在 WebUI 改好账密，再把实际账密填到这里。保存后才会启用自动填充；旧版本迁移过来的 token 不会直接覆盖当前密码。</p>
+          <div class="field" style="margin-top:10px">
+            <label for="config-instance-name">实例名称</label>
+            <input id="config-instance-name" maxlength="32" value="${escapeHtml(instance.name)}">
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label for="config-instance-username">后台用户名</label>
+            <input id="config-instance-username" maxlength="64" value="${escapeHtml(instance.username || "astrbot")}" placeholder="例如：astrbot">
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label for="config-instance-password">后台密码</label>
+            <input id="config-instance-password" type="password" maxlength="128" value="${escapeHtml(instance.password || "")}" placeholder="首次可以先留空">
+            <div class="field-help">首次启动前可以留空；手动改好账密后必须回来填写，导入备份才能自动登录。</div>
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label for="config-instance-port">后台端口</label>
+            <input id="config-instance-port" type="number" min="1024" max="65535" value="${instancePort(instance) || ""}" placeholder="例如：24622">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
+            <button class="button ghost" id="cancel-instance-config">取消</button>
+            <button class="button primary" id="save-instance-config">保存配置</button>
+          </div>
+        </div>`;
+      document.body.append(dialog);
+      $("#cancel-instance-config", dialog).onclick = () => dialog.remove();
+      $("#save-instance-config", dialog).onclick = async () => {
+        const name = $("#config-instance-name", dialog).value.trim();
+        const username = $("#config-instance-username", dialog).value.trim();
+        const password = $("#config-instance-password", dialog).value;
+        const port = Number($("#config-instance-port", dialog).value);
+        const previousPort = instancePort(instance);
+        if (!name) return showToast("请输入实例名称");
+        if (!username) return showToast("请输入后台用户名");
+        if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+          return showToast("端口需在 1024-65535 之间");
+        }
+        const duplicate = state.instances.some(item =>
+          item !== instance && instancePort(item) === port);
+        if (duplicate) return showToast("端口已被其他实例使用");
+        if (instance.running && previousPort && port !== previousPort) {
+          const stopped = await runTask(
+            "stop-astrbot",
+            instance,
+            `停止-${instance.name}`,
+            { wait: true, timeoutMs: 120000 });
+          if (!stopped || !stopped.ok) {
+            showToast("旧端口实例未停止，配置暂未保存");
+            return;
+          }
+          instance.running = false;
+        }
+        instance.name = name;
+        instance.username = username;
+        instance.password = password;
+        instance.credentialsConfirmed = true;
+        instance.port = port;
+        saveInstances();
+        renderInstances();
+        dialog.remove();
+        record(`实例配置已保存：${name} · 端口 ${port}`);
+        showToast("实例配置已保存");
+      };
+    }
+    async function waitForTask(requestPath, timeoutMs = 30 * 60 * 1000) {
+      if (!requestPath) {
+        return { state: "unknown", message: "没有收到任务状态文件" };
+      }
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        await sleep(1500);
+        const status = parse(invoke("loadTaskStatus", requestPath), {});
+        if (status && ["success", "failed", "launched"].includes(status.state)) {
+          return status;
+        }
+      }
+      return { state: "timeout", message: "执行时间较长，请到终端会话查看进度" };
+    }
+    async function trackTask(task) {
+      const status = await waitForTask(task.request, task.timeoutMs);
+      const component = componentForAction(task.action);
+      if (component) state.tasks[component] = { state: status.state };
+      if (status.state === "success" || status.state === "launched") {
+        const detail = status.state === "launched" ? "会话已启动" : "完成";
+        const message = status.message ? ` · ${status.message}` : "";
+        if (!task.silent) record(`${task.label}：${detail}${message}`);
+        if (!task.silent) showToast(`${task.label}：${detail}`);
+      } else if (status.state === "failed") {
+        const line = status.line ? `第 ${status.line} 行` : "未知位置";
+        if (!task.silent) record(`${task.label}：失败（${line}，退出码 ${status.code || "未知"}）`);
+        if (!task.silent) showToast(`${task.label}失败，请查看终端会话`);
+      } else {
+        if (!task.silent) record(`${task.label}：仍在执行，${status.message || "请查看终端会话"}`);
+      }
+      await refreshPorts();
+      await refreshEnvironment();
+    }
+    async function runTask(action, payload = {}, label = "", options = {}) {
+      if (state.busy) {
+        showToast("已有任务正在投递");
+        return false;
+      }
+      state.busy = true;
+      const result = parse(invoke("runAction", action, JSON.stringify(payload), label || action), {});
+      state.busy = false;
+      if (result.ok) {
+        const component = componentForAction(action);
+        if (component) state.tasks[component] = { state: "running" };
+        if (!options.silent) record(`${label || action}：已提交到终端会话，正在执行`);
+        if (!options.silent) showToast("已打开 ZeroTermux 会话");
+        refreshRuntimeStates();
+        if (component === "bootstrap") await refreshEnvironment();
+        if (options.wait) {
+          const status = await waitForTask(
+            result.request,
+            options.timeoutMs || 30 * 60 * 1000);
+          if (component) state.tasks[component] = { state: status.state };
+          if (component === "bootstrap") await refreshEnvironment();
+          if (status.state === "success" || status.state === "launched") {
+            if (!options.silent) record(`${label || action}：${status.state === "launched" ? "会话已启动" : "完成"}`);
+            await refreshPorts();
+            return { ok: true, request: result.request, ...status };
+          }
+          if (status.state !== "failed") {
+            if (!options.silent) {
+              record(`${label || action}：未收到完成确认，${status.message || "请查看终端会话"}`);
+            }
+            return { ok: false, request: result.request, ...status };
+          }
+          const line = status.line ? `第 ${status.line} 行` : "未知位置";
+          if (!options.silent) {
+            record(`${label || action}：失败（${line}，退出码 ${status.code || "未知"}）`);
+          }
+          return { ok: false, request: result.request, ...status };
+        }
+        trackTask({
+          request: result.request,
+          action,
+          label: label || action,
+          silent: Boolean(options.silent)
+        });
+      } else {
+        record(`${label || action} 投递失败：${result.message || "未知错误"}`);
+        showToast(result.message || "投递失败");
+        if (result.code === "RUN_COMMAND_DENIED") {
+          record("缺少终端运行权限，已发起系统授权");
+          invoke("requestTermuxPermission");
+        }
+      }
+      return Boolean(result.ok);
+    }
+    async function refreshBackups() {
+      const folder = $("#backup-folder").value.trim();
+      const data = parse(invoke("listBackups", folder), { files: [] });
+      const root = $("#backup-list");
+      if (!data.ok || !Array.isArray(data.files) || !data.files.length) {
+        root.innerHTML = `<div class="empty">${escapeHtml(data.message || "没有找到 ZIP 备份包")}</div>`;
+        return;
+      }
+      root.innerHTML = data.files.map(file => `
+        <article class="backup-item">
+          <div class="backup-info">
+            <strong>${escapeHtml(file.name)}</strong>
+            <span>${formatBytes(Number(file.size))}</span>
+          </div>
+          <button class="button small primary" data-backup-path="${escapeHtml(file.path)}" data-backup-name="${escapeHtml(file.name)}">导入</button>
+        </article>`).join("");
+    }
+    function startBackupImport(path, name) {
+      if (!state.instances.length) {
+        showToast("请先创建 AstrBot 实例");
+        switchPanel("instances");
+        return;
+      }
+      const options = state.instances.map((instance, index) =>
+        `<option value="${index}">${escapeHtml(instance.name)} · ${instancePort(instance) || "端口未配置"}</option>`).join("");
+      const dialog = document.createElement("div");
+      dialog.style.cssText = "position:fixed;inset:0;background:#000b;z-index:80;display:grid;place-items:center;padding:20px";
+      dialog.innerHTML = `
+        <div style="width:100%;max-width:430px;background:#151b23;border:1px solid #2c3644;border-radius:10px;padding:16px">
+          <h3 style="margin:0 0 5px;font-size:17px">选择目标实例</h3>
+          <p style="margin:0 0 14px;color:#93a1b2;font-size:12px;word-break:break-all">${escapeHtml(name)}</p>
+          <select id="import-instance" style="width:100%;height:42px;background:#10161d;color:#edf3f8;border:1px solid #2c3644;border-radius:8px;padding:0 10px">${options}</select>
+          <div class="field-help" style="margin-top:10px">导入会自动读取实例配置里保存的后台用户名、密码和端口。</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
+            <button class="button ghost" id="cancel-import">取消</button>
+            <button class="button danger" id="confirm-import">开始导入</button>
+          </div>
+        </div>`;
+      document.body.append(dialog);
+      $("#cancel-import", dialog).onclick = () => dialog.remove();
+      $("#confirm-import", dialog).onclick = async () => {
+        const instance = state.instances[Number($("#import-instance", dialog).value)];
+        if (!instance) return;
+        if (!instancePort(instance)) {
+          showToast("请先到实例配置里填写端口");
+          dialog.remove();
+          openInstanceConfig(instance);
+          return;
+        }
+        if (!instanceCredentialsReady(instance)) {
+          showToast("请先到实例配置里记录后台用户名和密码");
+          dialog.remove();
+          openInstanceConfig(instance);
+          return;
+        }
+        dialog.remove();
+        const started = await startInstance(instance, false);
+        if (!started) return;
+        let ready = false;
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          if (invoke("portOpen", Number(instance.port))) {
+            ready = true;
+            break;
+          }
+          await sleep(1000);
+        }
+        if (!ready) {
+          record(`导入备份-${instance.name}：实例未在 60 秒内就绪`);
+          showToast("实例尚未就绪，请先查看终端会话");
+          return;
+        }
+        await runTask("import-astrbot", {
+          id: instance.id,
+          name: instance.name,
+          port: instancePort(instance),
+          username: instance.username,
+          password: instance.password,
+          backupPath: path,
+          backupName: name
+        }, `导入备份-${instance.name}`);
+      };
+    }
+    function startInstance(instance, showRecord = true) {
+      if (!instancePort(instance)) {
+        showToast("请先配置实例端口");
+        openInstanceConfig(instance);
+        return false;
+      }
+      const payload = {
+        ...instance,
+        password: instance.credentialsConfirmed ? instance.password : ""
+      };
+      return runTask(
+        "start-astrbot",
+        payload,
+        `AstrBot-${instance.name}`,
+        { silent: !showRecord });
+    }
+    async function readNapcatToken() {
+      showToast("正在读取 NapCat 配置");
+      const task = await runTask(
+        "napcat-token",
+        {},
+        "读取 NapCat 密钥",
+        { wait: true, timeoutMs: 60000, silent: true });
+      if (!task || !task.ok) {
+        record("读取 NapCat 密钥失败：请先启动 NapCat 一次");
+        showToast("请先启动 NapCat 一次，再读取密钥");
+        return;
+      }
+      const raw = String(invoke("readNapcatWebuiConfig") || "").replace(/^\uFEFF/, "");
+      const config = parse(raw, {});
+      const token = String(config.token || config.webUiToken || "").trim();
+      if (!token) {
+        record("读取 NapCat 密钥失败：配置文件里没有 token");
+        showToast("配置文件中没有找到 NapCat 密钥");
+        return;
+      }
+      const port = Number(config.port) || 6099;
+      invoke("copyText", token);
+      record("NapCat 密钥已读取并复制到剪切板");
+      const dialog = document.createElement("div");
+      dialog.style.cssText = "position:fixed;inset:0;background:#000d;z-index:90;display:grid;place-items:center;padding:18px";
+      dialog.innerHTML = `
+        <div style="width:100%;max-width:460px;background:#151b23;border:1px solid #2c3644;border-radius:10px;padding:16px">
+          <h3 style="margin:0 0 10px;font-size:18px">NapCat WebUI 密钥</h3>
+          <div style="padding:11px;background:#0d0713;border:1px solid #3d2950;border-radius:8px;word-break:break-all;font-family:monospace;font-size:13px">${escapeHtml(token)}</div>
+          <div style="margin-top:10px;color:#b8a7c4;font-size:12px">端口 ${port} · 密钥已经复制到剪切板</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
+            <button class="button ghost" id="copy-napcat-token">再次复制</button>
+            <button class="button primary" id="close-napcat-token">关闭</button>
+          </div>
+        </div>`;
+      document.body.append(dialog);
+      $("#copy-napcat-token", dialog).onclick = () => {
+        invoke("copyText", token);
+        showToast("NapCat 密钥已复制");
+      };
+      $("#close-napcat-token", dialog).onclick = () => dialog.remove();
+    }
+    function showNapcatReverseWsToken(token, generated) {
+      invoke("copyText", token);
+      const dialog = document.createElement("div");
+      dialog.style.cssText = "position:fixed;inset:0;background:#000d;z-index:90;display:grid;place-items:center;padding:18px";
+      dialog.innerHTML = `
+        <div style="width:100%;max-width:500px;background:#151b23;border:1px solid #2c3644;border-radius:10px;padding:16px">
+          <h3 style="margin:0 0 10px;font-size:18px">NapCat 反向 WS Token</h3>
+          <div style="padding:11px;background:#0d0713;border:1px solid #3d2950;border-radius:8px;word-break:break-all;font-family:monospace;font-size:13px">${escapeHtml(token)}</div>
+          <div style="margin-top:10px;color:#b8a7c4;font-size:12px">${generated ? "已复制到剪切板，请填入 AstrBot 对应适配器。" : "已复制到剪切板。"}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
+            <button class="button ghost" id="copy-napcat-ws-token">再次复制</button>
+            <button class="button primary" id="close-napcat-ws-token">关闭</button>
+          </div>
+        </div>`;
+      document.body.append(dialog);
+      $("#copy-napcat-ws-token", dialog).onclick = () => {
+        invoke("copyText", token);
+        showToast("Token 已复制");
+      };
+      $("#close-napcat-ws-token", dialog).onclick = () => dialog.remove();
+    }
+    async function openNapcatWsConfig() {
+      const raw = String(invoke("readNapcatReverseWsConfig") || "").replace(/^\uFEFF/, "");
+      const previous = parse(raw, {}).last || {};
+      const value = (key, fallback) => escapeHtml(previous[key] ?? fallback);
+      const dialog = document.createElement("div");
+      dialog.style.cssText = "position:fixed;inset:0;background:#000d;z-index:88;display:grid;place-items:center;padding:16px;overflow:auto";
+      dialog.innerHTML = `
+        <div style="width:100%;max-width:560px;max-height:92vh;overflow:auto;background:#151b23;border:1px solid #2c3644;border-radius:10px;padding:16px">
+          <h3 style="margin:0 0 6px;font-size:18px">NapCat 反向 WS 连接</h3>
+          <div style="color:#b8a7c4;font-size:12px;margin-bottom:14px">只更新值班室管理的连接，手动连接不会被覆盖。</div>
+          <div class="field">
+            <label for="napcat-ws-name">连接名称</label>
+            <input id="napcat-ws-name" maxlength="64" value="${value("name", "值班室-AstrBot")}">
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label for="napcat-ws-url">服务端 WebSocket URL</label>
+            <input id="napcat-ws-url" maxlength="256" value="${value("url", "ws://127.0.0.1:6199/ws")}">
+          </div>
+          <div class="field" style="margin-top:10px">
+            <label for="napcat-ws-token">鉴权 Token</label>
+            <input id="napcat-ws-token" maxlength="256" value="${value("token", "")}" placeholder="留空时复用旧 Token，首次会自动生成">
+          </div>
+          <div class="form-row" style="margin-top:10px">
+            <div class="field">
+              <label for="napcat-ws-format">消息上报格式</label>
+              <select id="napcat-ws-format">
+                <option value="array" ${String(previous.messagePostFormat || "array") === "array" ? "selected" : ""}>Array（推荐）</option>
+                <option value="string" ${String(previous.messagePostFormat || "") === "string" ? "selected" : ""}>String</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>连接角色</label>
+              <input value="Universal（全双工，API + 事件）" disabled>
+            </div>
+          </div>
+          <div class="form-row" style="margin-top:10px">
+            <div class="field">
+              <label for="napcat-ws-heart">心跳间隔（ms）</label>
+              <input id="napcat-ws-heart" type="number" min="1" value="${value("heartInterval", 30000)}">
+            </div>
+            <div class="field">
+              <label for="napcat-ws-reconnect">重连间隔（ms）</label>
+              <input id="napcat-ws-reconnect" type="number" min="1" value="${value("reconnectInterval", 5000)}">
+            </div>
+          </div>
+          <div style="display:grid;gap:10px;margin-top:13px;color:#d9cee1;font-size:13px">
+            <label style="display:flex;align-items:center;gap:9px"><input id="napcat-ws-self" type="checkbox" ${previous.reportSelfMessage ? "checked" : ""}>上报 Bot 自身发出的消息</label>
+            <label style="display:flex;align-items:center;gap:9px"><input id="napcat-ws-debug" type="checkbox" ${previous.debug !== false ? "checked" : ""}>开启调试输出</label>
+            <label style="display:flex;align-items:center;gap:9px"><input id="napcat-ws-enable" type="checkbox" ${previous.enable !== false ? "checked" : ""}>启用此连接</label>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
+            <button class="button ghost" id="cancel-napcat-ws">取消</button>
+            <button class="button primary" id="save-napcat-ws">写入连接</button>
+          </div>
+        </div>`;
+      document.body.append(dialog);
+      $("#cancel-napcat-ws", dialog).onclick = () => dialog.remove();
+      $("#save-napcat-ws", dialog).onclick = async () => {
+        const payload = {
+          name: $("#napcat-ws-name", dialog).value.trim(),
+          url: $("#napcat-ws-url", dialog).value.trim(),
+          token: $("#napcat-ws-token", dialog).value,
+          messagePostFormat: $("#napcat-ws-format", dialog).value,
+          heartInterval: Number($("#napcat-ws-heart", dialog).value),
+          reconnectInterval: Number($("#napcat-ws-reconnect", dialog).value),
+          reportSelfMessage: $("#napcat-ws-self", dialog).checked,
+          debug: $("#napcat-ws-debug", dialog).checked,
+          enable: $("#napcat-ws-enable", dialog).checked
+        };
+        if (!payload.name) return showToast("请输入连接名称");
+        if (!/^wss?:\/\//i.test(payload.url)) return showToast("连接地址必须以 ws:// 或 wss:// 开头");
+        if (!Number.isInteger(payload.heartInterval) || payload.heartInterval < 1) {
+          return showToast("心跳间隔必须大于 0");
+        }
+        if (!Number.isInteger(payload.reconnectInterval) || payload.reconnectInterval < 1) {
+          return showToast("重连间隔必须大于 0");
+        }
+        const wasRunning = Boolean(invoke("portOpen", 6099));
+        const task = await runTask(
+          "configure-napcat-ws",
+          payload,
+          "配置 NapCat 反向 WS",
+          { wait: true, timeoutMs: 5 * 60 * 1000 });
+        if (!task || !task.ok) {
+          showToast("连接配置写入失败，请查看终端会话");
+          return;
+        }
+        const savedRaw = String(invoke("readNapcatReverseWsConfig") || "").replace(/^\uFEFF/, "");
+        const saved = (parse(savedRaw, {}).last) || {};
+        const savedToken = String(saved.token || payload.token || "");
+        dialog.remove();
+        record(`NapCat 连接已写入：${saved.name || payload.name}；手动连接保持不变`);
+        if (!payload.token && savedToken) {
+          showNapcatReverseWsToken(savedToken, true);
+        } else {
+          showToast("连接配置已写入，手动连接未覆盖");
+        }
+        if (wasRunning) runTask("start-napcat", {}, "启动 NapCat");
+      };
+    }
+    async function createInstance() {
+      const name = $("#instance-name").value.trim();
+      if (!name) return showToast("请输入实例名称");
+      const id = `bot-${Date.now().toString(36)}`;
+      const instance = {
+        id,
+        name,
+        username: "astrbot",
+        password: "",
+        port: 0,
+        createdAt: Date.now()
+      };
+      const result = await runTask("create-astrbot", { id, name }, `创建-${name}`, {
+        wait: true,
+        timeoutMs: 8 * 60 * 1000
+      });
+      if (!result || !result.ok) {
+        record(`创建-${name}：未成功，实例未加入列表`);
+        showToast("实例创建未完成，请查看终端会话");
+        return;
+      }
+      state.instances.push(instance);
+      saveInstances();
+      renderInstances();
+      record(`创建-${name}：已加入实例列表`);
+      $("#instance-name").value = "";
+      openInstanceConfig(instance);
+    }
+    function switchPanel(name) {
+      $$(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.panel === name));
+      $$(".panel").forEach(panel => panel.classList.toggle("active", panel.id === `panel-${name}`));
+      if (name === "backup") refreshBackups();
+      if (name === "instances") loadInstances();
+    }
+    function parseInlineCommand(command) {
+      return { command };
+    }
+
+    $$(".tab").forEach(tab => tab.onclick = () => switchPanel(tab.dataset.panel));
+    $$("[data-action]").forEach(button => button.onclick = () =>
+      runTask(button.dataset.action, {}, button.dataset.label));
+    $("#open-terminal").onclick = () => {
+      if (invoke("openTermux")) record("已切换到 ZeroTermux");
+      else invoke("showTermuxSetup");
+    };
+    $("#fix-terminal").onclick = () => invoke("showTermuxSetup");
+    $("#storage-permission").onclick = () => invoke("openSettings", "all_files");
+    $("#choose-backup-folder").onclick = () => invoke("chooseBackupFolder");
+    $("#battery-permission").onclick = () => invoke("openSettings", "battery");
+    $("#cleanup-cache").onclick = async () => {
+      if (!confirm("停止所有服务并清理下载残片和缓存？实例、账密、端口、备份和已保存模型都会保留。")) {
+        return;
+      }
+      await runTask(
+        "cleanup",
+        {},
+        "停服务并清缓存",
+        { wait: true, timeoutMs: 10 * 60 * 1000 });
+    };
+    $("#napcat-webui").onclick = () => invoke("openEdge", "http://127.0.0.1:6099");
+    $("#napcat-token").onclick = readNapcatToken;
+    $("#napcat-ws-config").onclick = openNapcatWsConfig;
+    $("#uninstall-napcat").onclick = async () => {
+      if (!confirm("卸载当前 NapCat？\n\n会停止 NapCat，并删除运行目录、QQ 登录态、WebUI 密钥、反向连接配置和下载缓存。\n\n之后点击“部署/更新”会安装 v4.18.28。")) {
+        return;
+      }
+      await runTask(
+        "uninstall-napcat",
+        {},
+        "卸载 NapCat",
+        { wait: true, timeoutMs: 5 * 60 * 1000 });
+    };
+    $("#uninstall-astrbot").onclick = async () => {
+      if (!confirm("卸载当前 AstrBot 运行底座？\n\n会停止全部 AstrBot 实例并删除 Python 运行环境；instances 目录中的实例数据、账密、端口和备份都会保留。\n\n之后点击“部署/更新”会安装 v4.27.3。")) {
+        return;
+      }
+      await runTask(
+        "uninstall-astrbot",
+        {},
+        "卸载 AstrBot",
+        { wait: true, timeoutMs: 8 * 60 * 1000 });
+    };
+    $("#minilm-test").onclick = () => {
+      const result = parse(invoke("localHttp", "http://127.0.0.1:8000/health"), {});
+      showToast(result.ok ? "MiniLM 服务可访问" : "MiniLM 尚未启动");
+      record(`MiniLM 接口测试：${result.ok ? "成功" : "失败"}`);
+    };
+    $("#clear-activity").onclick = () => {
+      $("#activity-log").innerHTML = "<strong>还没有操作。</strong>";
+      $("#activity-log").dataset.empty = "1";
+    };
+    $("#refresh-instances").onclick = () => { loadInstances(); refreshPorts(); };
+    $("#refresh-backups").onclick = refreshBackups;
+    $("#create-instance").onclick = createInstance;
+    $("#environment-list").onclick = async event => {
+      const action = event.target.closest("[data-env-action]")?.dataset.envAction;
+      if (action === "files") invoke("openSettings", "all_files");
+      if (action === "battery") invoke("openSettings", "battery");
+      if (action === "termux") invoke("openTermux");
+      if (action === "termux_overlay") invoke("openSettings", "termux_overlay");
+      if (action === "termux_command") {
+        invoke("requestTermuxPermission");
+        record("已发起终端运行权限请求");
+        showToast("请在系统弹窗中允许终端运行权限");
+      }
+      if (action === "edge") showToast("请先安装 Microsoft Edge");
+    };
+    window.onTermuxPermissionResult = async resultValue => {
+      const result = parse(resultValue, {});
+      if (result.ok) {
+        record("终端运行权限验证成功");
+        showToast("终端运行权限已就绪");
+      } else {
+        record(`终端运行权限验证失败：${result.detail || result.message || "未知错误"}`);
+        showToast(result.message || "终端运行权限仍不可用");
+      }
+      await refreshEnvironment();
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) refreshEnvironment();
+    });
+    $("#instance-list").onclick = event => {
+      const button = event.target.closest("[data-instance-action]");
+      if (!button) return;
+      const index = Number(button.dataset.index);
+      const instance = state.instances[index];
+      if (!instance) return;
+      const action = button.dataset.instanceAction;
+      if (action === "config") openInstanceConfig(instance);
+      if (action === "start") startInstance(instance);
+      if (action === "stop") runTask("stop-astrbot", instance, `停止-${instance.name}`);
+      if (action === "web") {
+        const port = instancePort(instance);
+        if (!port) {
+          showToast("请先配置实例端口");
+          openInstanceConfig(instance);
+        } else {
+          invoke("openEdge", `http://127.0.0.1:${port}`);
+        }
+      }
+      if (action === "delete") {
+        if (!confirm(`删除实例“${instance.name}”？实例目录会保留。`)) return;
+        state.instances.splice(index, 1);
+        saveInstances();
+        renderInstances();
+        record(`已从管理列表移除 ${instance.name}`);
+      }
+    };
+    $("#backup-list").onclick = event => {
+      const button = event.target.closest("[data-backup-path]");
+      if (button) startBackupImport(button.dataset.backupPath, button.dataset.backupName);
+    };
+
+    async function boot() {
+      invoke("syncBundle");
+      await refreshEnvironment();
+      loadInstances();
+      await refreshPorts();
+      await refreshBackups();
+      record("管理界面已启动");
+      setInterval(refreshPorts, 5000);
+    }
+    boot();
+  </script>
+</body>
+</html>
