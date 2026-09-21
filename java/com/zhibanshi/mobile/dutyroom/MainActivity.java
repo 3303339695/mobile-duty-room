@@ -1166,7 +1166,7 @@ public class MainActivity extends Activity {
                 state.put("termuxPermission", termuxPermissionState());
                 state.put("edgeInstalled", isPackageInstalled(EDGE_PACKAGE));
                 state.put("package", getPackageName());
-                state.put("version", "1.3.5");
+                state.put("version", "1.3.6");
                 JSONObject initialization = readJsonConfig("environment.json");
                 state.put("environmentReady", initialization.optBoolean("ready", false));
                 state.put("environmentUpdatedAt", initialization.optString("updatedAt", ""));
