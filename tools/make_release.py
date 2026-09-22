@@ -6,8 +6,8 @@ import sys
 import zipfile
 
 
-VERSION = "1.3.6"
-LABEL = "通用版"
+VERSION = "1.3.9"
+LABEL = "兼容回退版"
 APK_BASENAME = f"手机端值班室-v{VERSION}-{LABEL}.apk"
 ZIP_BASENAME = f"手机端值班室-v{VERSION}-{LABEL}.zip"
 SHARE_APK_BASENAME = f"mobile-duty-room-v{VERSION}.apk"

@@ -10,7 +10,14 @@ import tarfile
 import urllib.request
 
 
-REPOSITORY = "mlikiowa/napcat-docker"
+DEFAULT_REPOSITORY = "smanx/docker-qq"
+DEFAULT_TAG = "3.2.23-44343"
+DEFAULT_MANIFEST_DIGEST = (
+    "sha256:f410a57799769f9069a4eb100f941e89c369bbc01044cfbf7efb877e9ba9139b"
+)
+DEFAULT_LAYER_DIGEST = (
+    "sha256:383e8849887158afc622ae40168437dbbac6135ead7d34fc61c9f73f50e271c1"
+)
 REGISTRY = "https://registry-1.docker.io/v2"
 INDEX_ACCEPT = (
     "application/vnd.oci.image.index.v1+json, "
@@ -31,8 +38,8 @@ def request(url, token="", accept="application/json"):
     return urllib.request.Request(url, headers=headers)
 
 
-def registry_token():
-    scope = f"repository:{REPOSITORY}:pull"
+def registry_token(repository):
+    scope = f"repository:{repository}:pull"
     url = (
         "https://auth.docker.io/token"
         f"?service=registry.docker.io&scope={scope}"
@@ -41,36 +48,51 @@ def registry_token():
         return json.load(response)["token"]
 
 
-def fetch_manifest(reference, token, accept):
-    url = f"{REGISTRY}/{REPOSITORY}/manifests/{reference}"
+def fetch_manifest(repository, reference, token, accept):
+    url = f"{REGISTRY}/{repository}/manifests/{reference}"
     with urllib.request.urlopen(request(url, token, accept), timeout=30) as response:
         return json.load(response)
 
 
-def resolve_arm64_manifest(tag, token):
-    document = fetch_manifest(tag, token, INDEX_ACCEPT)
+def resolve_arm64_manifest(repository, tag, token, manifest_digest=""):
+    if manifest_digest:
+        document = fetch_manifest(
+            repository, manifest_digest, token, MANIFEST_ACCEPT
+        )
+        if not document.get("layers"):
+            raise RuntimeError("固定镜像摘要不是有效的 arm64 镜像清单")
+        return document
+
+    document = fetch_manifest(repository, tag, token, INDEX_ACCEPT)
     manifests = document.get("manifests")
     if not manifests:
         return document
     for item in manifests:
         platform = item.get("platform") or {}
         if platform.get("os") == "linux" and platform.get("architecture") == "arm64":
-            return fetch_manifest(item["digest"], token, MANIFEST_ACCEPT)
+            return fetch_manifest(
+                repository, item["digest"], token, MANIFEST_ACCEPT
+            )
     raise RuntimeError("镜像中没有 linux/arm64 版本")
 
 
-def choose_qq_layer(manifest):
+def choose_qq_layer(manifest, layer_digest=""):
     layers = manifest.get("layers") or []
     if not layers:
         raise RuntimeError("镜像清单中没有层文件")
-    # NapCat 的 QQ 内核位于镜像最大的 tar 层中。
+    if layer_digest:
+        for layer in layers:
+            if layer.get("digest") == layer_digest:
+                return layer
+        raise RuntimeError("固定镜像清单中没有指定的 QQ 内核层")
+    # 旧版 NapCat 镜像把 QQ 内核放在镜像最大的 tar 层中。
     return max(layers, key=lambda item: int(item.get("size") or 0))
 
 
-def download_layer(layer, target, token):
+def download_layer(repository, layer, target, token):
     digest = layer["digest"]
     expected_size = int(layer.get("size") or 0)
-    url = f"{REGISTRY}/{REPOSITORY}/blobs/{digest}"
+    url = f"{REGISTRY}/{repository}/blobs/{digest}"
     temporary = target + ".part"
     print(f"[QQ 内核] 下载镜像层：{digest}", flush=True)
     with urllib.request.urlopen(request(url, token, None), timeout=120) as response:
@@ -151,15 +173,34 @@ def extract_qq(layer_path, output_dir):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--tag", default="v4.18.28")
+    parser.add_argument("--repository", default=DEFAULT_REPOSITORY)
+    parser.add_argument("--tag", default=DEFAULT_TAG)
+    parser.add_argument("--manifest-digest", default="")
+    parser.add_argument("--layer-digest", default="")
     parser.add_argument("--output", required=True)
     parser.add_argument("--cache", required=True)
     args = parser.parse_args()
 
     os.makedirs(args.cache, exist_ok=True)
-    token = registry_token()
-    manifest = resolve_arm64_manifest(args.tag, token)
-    layer = choose_qq_layer(manifest)
+    manifest_digest = args.manifest_digest
+    if (
+        not manifest_digest
+        and args.repository == DEFAULT_REPOSITORY
+        and args.tag == DEFAULT_TAG
+    ):
+        manifest_digest = DEFAULT_MANIFEST_DIGEST
+    layer_digest = args.layer_digest
+    if (
+        not layer_digest
+        and args.repository == DEFAULT_REPOSITORY
+        and args.tag == DEFAULT_TAG
+    ):
+        layer_digest = DEFAULT_LAYER_DIGEST
+    token = registry_token(args.repository)
+    manifest = resolve_arm64_manifest(
+        args.repository, args.tag, token, manifest_digest
+    )
+    layer = choose_qq_layer(manifest, layer_digest)
     layer_path = os.path.join(
         args.cache,
         "napcat-qq-" + layer["digest"].split(":", 1)[-1] + ".tar.gz",
@@ -169,7 +210,7 @@ def main():
     else:
         if os.path.exists(layer_path):
             os.remove(layer_path)
-        download_layer(layer, layer_path, token)
+        download_layer(args.repository, layer, layer_path, token)
 
     try:
         executable = extract_qq(layer_path, args.output)

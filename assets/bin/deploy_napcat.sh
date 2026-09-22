@@ -8,6 +8,17 @@ napcat_pid_file() {
   printf '%s/config/napcat.pid' "$HOME_ROOT"
 }
 
+napcat_config_file() {
+  printf '%s/opt/QQ/resources/app/app_launcher/napcat/config/napcat.json' "$(napcat_root)"
+}
+
+ensure_napcat_o3_hook() {
+  local config
+  config="$(napcat_config_file)"
+  [ -d "$(dirname "$config")" ] || return 0
+  python3 "$HOME_ROOT/bin/configure_napcat_o3.py" --config "$config" >/dev/null
+}
+
 napcat_runtime_complete() {
   local base
   base="$(napcat_root)"
@@ -36,21 +47,23 @@ qq_kernel_supported() {
   local version build
   version="$(qq_kernel_version)"
   build="$(qq_kernel_build "$version")"
-  [ -n "$version" ] && [ -n "$build" ] && [ "$build" -ge "$MIN_QQ_BUILD" ] 2>/dev/null
+  [ "$version" = "$REQUIRED_QQ_VERSION" ] && \
+    [ "$build" = "$REQUIRED_QQ_BUILD" ] 2>/dev/null
 }
 
 deploy_napcat() {
   local base
   base="$(napcat_root)"
+  ensure_napcat_o3_hook || die "NapCat o3HookMode 配置写入失败"
   if napcat_runtime_complete; then
     local kernel_version
     kernel_version="$(qq_kernel_version)"
     log "NapCat 完整性校验通过：$NAPCAT_VERSION"
-    log "Linux QQ 内核：$kernel_version · 构建 $(qq_kernel_build "$kernel_version") ≥ $MIN_QQ_BUILD，无需补内核"
+    log "Linux QQ 内核：$kernel_version · 与 NapCat $NAPCAT_VERSION 精确匹配，无需补内核"
     touch_runtime_state \
       "napcat" "$base" "$NAPCAT_VERSION" "qqKernel" "$kernel_version"
     link_runtime "$base" "napcat"
-    TASK_RESULT_MESSAGE="QQ 内核 $kernel_version 已满足构建 $MIN_QQ_BUILD，无需补内核"
+    TASK_RESULT_MESSAGE="QQ 内核 $kernel_version 已匹配 NapCat $NAPCAT_VERSION，无需补内核"
     ok "已有完整 NapCat 环境，跳过重复部署"
     return
   fi
@@ -86,27 +99,43 @@ deploy_napcat() {
   [ -s "$napcat_archive" ] || die "NapCat Shell 安装包尚未就绪"
 
   local qq_url qq_urls=() qq_ready=0
-  if qq_kernel_supported; then
-    log "复用已经准备好的 Linux QQ 运行内核"
+  if [ -s "$base/opt/QQ/qq" ]; then
+    warn "当前运行组合不是完整目标版本，删除旧内核 $REQUIRED_QQ_VERSION 后重新准备"
+  fi
+  rm -rf "$base"
+  mkdir -p "$base"
+  log "从 $NAPCAT_QQ_DOCKER_REPOSITORY:$NAPCAT_QQ_DOCKER_TAG 准备 Linux QQ arm64 运行内核"
+  if debian_shell "
+    set -e
+    python3 /opt/zhibanshi/bin/fetch_napcat_qq_docker.py \
+      --repository '${NAPCAT_QQ_DOCKER_REPOSITORY}' \
+      --tag '${NAPCAT_QQ_DOCKER_TAG}' \
+      --manifest-digest '${NAPCAT_QQ_DOCKER_MANIFEST_DIGEST}' \
+      --layer-digest '${NAPCAT_QQ_DOCKER_LAYER_DIGEST}' \
+      --output '/opt/zhibanshi/runtime/napcat' \
+      --cache '/opt/zhibanshi/downloads'
+  " && qq_kernel_supported; then
     qq_ready=1
-  else
-    if [ -s "$base/opt/QQ/qq" ]; then
-      warn "现有 Linux QQ 内核 $(qq_kernel_version) 低于最低构建 $MIN_QQ_BUILD，停止复用"
-    fi
+  fi
+
+  if [ "$qq_ready" -ne 1 ]; then
     rm -rf "$base"
     mkdir -p "$base"
-    log "优先从 NapCat 官方 ARM64 镜像准备 Linux QQ 运行内核"
+    warn "固定镜像不可用，尝试从 $NAPCAT_QQ_FALLBACK_REPOSITORY:$NAPCAT_QQ_FALLBACK_TAG 恢复内核"
     if debian_shell "
       set -e
       python3 /opt/zhibanshi/bin/fetch_napcat_qq_docker.py \
-        --tag 'v${NAPCAT_VERSION}' \
+        --repository '${NAPCAT_QQ_FALLBACK_REPOSITORY}' \
+        --tag '${NAPCAT_QQ_FALLBACK_TAG}' \
         --output '/opt/zhibanshi/runtime/napcat' \
         --cache '/opt/zhibanshi/downloads'
     " && qq_kernel_supported; then
       qq_ready=1
-    else
-      warn "官方镜像暂不可用，改用腾讯官方 Linux QQ arm64 安装包"
     fi
+  fi
+
+  if [ "$qq_ready" -ne 1 ]; then
+    warn "Docker 镜像暂不可用，改用腾讯 Linux QQ arm64 安装包"
   fi
 
   if [ "$qq_ready" -ne 1 ]; then
@@ -118,11 +147,7 @@ deploy_napcat() {
       'python3 /opt/zhibanshi/bin/resolve_linux_qq.py' \
       2>/dev/null || true)
     if [ "${#qq_urls[@]}" -eq 0 ]; then
-      qq_urls+=(
-        "https://qqdl.gtimg.cn/qqfile/QQNT/9.9.31/release/00e6a3e7/QQ_3.2.29_260528_arm64_01.deb"
-        "https://dldir1v6.qq.com/qqfile/qq/QQNT/a5fab4ff/linuxqq_3.2.18-36580_arm64.deb"
-        "https://dldir1v6.qq.com/qqfile/qq/QQNT/Linux/QQ_3.2.18_250626_arm64_01.deb"
-      )
+      die "未解析到 Linux QQ $REQUIRED_QQ_VERSION 的 arm64 安装包，已停止部署以避免安装错误版本"
     fi
     for qq_url in "${qq_urls[@]}"; do
       log "Linux QQ 包：$qq_url"
@@ -146,14 +171,14 @@ deploy_napcat() {
         qq_ready=1
         break
       fi
-      warn "该安装包内核 $(qq_kernel_version) 低于最低构建 $MIN_QQ_BUILD，继续尝试备用地址"
+      warn "该安装包内核 $(qq_kernel_version) 与要求 $REQUIRED_QQ_VERSION 不一致，继续尝试备用地址"
       rm -rf "$base"
       mkdir -p "$base"
       rm -f "$DOWNLOAD_DIR/linuxqq-arm64.deb" 2>/dev/null || true
     done
   fi
   [ "$qq_ready" -eq 1 ] || \
-    die "Linux QQ 运行内核不可用或版本低于构建 $MIN_QQ_BUILD，请检查网络后重试部署"
+    die "Linux QQ 运行内核不是要求的 $REQUIRED_QQ_VERSION，请检查网络后重试部署"
 
   debian_shell \
     "test -s '/opt/zhibanshi/downloads/$(basename "$napcat_archive")'" || \
@@ -178,6 +203,7 @@ deploy_napcat() {
     rm -rf '/opt/zhibanshi/runtime/napcat/napcat-shell'
   " || die "NapCat 文件注入失败"
 
+  ensure_napcat_o3_hook || die "NapCat o3HookMode 配置写入失败"
   printf '%s\n' "$NAPCAT_VERSION" > "$CONFIG_DIR/napcat.version"
   touch_runtime_state \
     "napcat" "$base" "$NAPCAT_VERSION" "qqKernel" "$(qq_kernel_version)"
@@ -192,6 +218,7 @@ start_napcat() {
   qq_bin="$(napcat_root)/opt/QQ/qq"
   pid_file="$(napcat_pid_file)"
   [ -f "$qq_bin" ] || die "NapCat 尚未部署"
+  ensure_napcat_o3_hook || die "NapCat o3HookMode 配置写入失败"
   if pid_running "$pid_file" || is_port_open 6099; then
     warn "NapCat 已经在运行"
     sleep 2
@@ -241,6 +268,32 @@ uninstall_napcat() {
     "$DOWNLOAD_DIR"/napcat-qq-*.tar.gz 2>/dev/null || true
   ok "NapCat 运行目录、登录态和 WebUI 配置已删除"
   warn "重新点击“部署/更新”会安装 v$NAPCAT_VERSION"
+}
+
+uninstall_napcat_kernel() {
+  local base
+  base="$(napcat_root)"
+  [ -n "$base" ] && [ "$base" != "$HOME_ROOT" ] || die "NapCat 运行目录无效"
+
+  log "卸载 Linux QQ 内核"
+  stop_napcat || true
+  pkill -TERM -f 'xvfb-run.*/opt/zhibanshi/runtime/[n]apcat' 2>/dev/null || true
+  pkill -KILL -f 'xvfb-run.*/opt/zhibanshi/runtime/[n]apcat' 2>/dev/null || true
+  rm -rf "$base/opt/QQ"
+  rm -f "$PUBLIC_ROOT/runtime-napcat" \
+    "$CONFIG_DIR/napcat.version" \
+    "$CONFIG_DIR/napcat-runtime.json" \
+    "$CONFIG_DIR/napcat-webui.json" \
+    "$CONFIG_DIR/napcat-reverse-ws.json" \
+    "$HOME_ROOT/config/napcat-reverse-ws-state.json" 2>/dev/null || true
+  ok "Linux QQ 内核、登录态、WebUI 密钥和连接配置已删除"
+  warn "NapCat 下载包已保留；点击“重装内核”会安装 $REQUIRED_QQ_VERSION"
+}
+
+reinstall_napcat_kernel() {
+  log "重装 Linux QQ 内核 $REQUIRED_QQ_VERSION"
+  uninstall_napcat_kernel
+  deploy_napcat
 }
 
 show_napcat_token() {

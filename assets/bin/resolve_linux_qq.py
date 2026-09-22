@@ -9,10 +9,9 @@ CONFIG_URLS = [
     "https://im.qq.com/linuxqq/index.shtml",
 ]
 
-RELEASE_URLS = [
-    "https://nclatest.znin.net/get_qq_ver",
-    "https://raw.githubusercontent.com/NapNeko/NapCatQQ/main/packages/napcat-shell-loader/qqnt.json",
-]
+REQUIRED_QQ_VERSION = "3.2.23-44343"
+REQUIRED_QQ_BASE_VERSION = REQUIRED_QQ_VERSION.split("-", 1)[0]
+PINNED_URLS = []
 
 
 def fetch(url):
@@ -24,12 +23,14 @@ def fetch(url):
         return response.read().decode("utf-8", "replace")
 
 
-def add(candidates, value):
+def add(candidates, value, require_match=True):
     if not value:
         return
     value = value.replace("\\/", "/").strip()
     if value.startswith("//"):
         value = "https:" + value
+    if require_match and REQUIRED_QQ_BASE_VERSION not in value:
+        return
     if value.startswith("https://") and value not in candidates:
         candidates.append(value)
 
@@ -43,49 +44,17 @@ def from_config_js(text, candidates):
         add(candidates, match.group(1))
 
 
-def from_release_json(text, candidates):
-    try:
-        payload = json.loads(text)
-    except Exception:
-        return
-    version = payload.get("linuxVersion")
-    build_hash = payload.get("linuxVerHash")
-    if not version or not build_hash:
-        return
-    add(
-        candidates,
-        "https://dldir1.qq.com/qqfile/qq/QQNT/"
-        f"{build_hash}/linuxqq_{version}_arm64.deb",
-    )
-
-
 def main():
     candidates = []
+    for url in PINNED_URLS:
+        add(candidates, url, require_match=False)
+
     for url in CONFIG_URLS:
         try:
             text = fetch(url)
         except Exception:
             continue
         from_config_js(text, candidates)
-
-    for url in RELEASE_URLS:
-        try:
-            text = fetch(url)
-        except Exception:
-            continue
-        from_release_json(text, candidates)
-
-    # 官方离线恢复源：NapCat 社区验证过的 Linux QQ 3.2.18 ARM64。
-    add(
-        candidates,
-        "https://dldir1v6.qq.com/qqfile/qq/QQNT/"
-        "a5fab4ff/linuxqq_3.2.18-36580_arm64.deb",
-    )
-    add(
-        candidates,
-        "https://dldir1.qq.com/qqfile/qq/QQNT/"
-        "a5fab4ff/linuxqq_3.2.18-36580_arm64.deb",
-    )
 
     for url in candidates:
         print(url)

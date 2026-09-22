@@ -194,7 +194,7 @@
         <div class="component-grid">
           <article class="surface component-card">
             <div class="component-top">
-              <div class="component-title"><strong>NapCat QQ</strong><span>v4.18.28 · WebUI 6099</span><span class="runtime-state" id="napcat-runtime">正在检查安装状态</span></div>
+              <div class="component-title"><strong>NapCat QQ</strong><span>v4.15.0 · Linux QQ 3.2.23-44343 · o3HookMode 0 · WebUI 6099</span><span class="runtime-state" id="napcat-runtime">正在检查安装状态</span></div>
               <span class="pill" id="napcat-status">检查中</span>
             </div>
             <div class="component-actions">
@@ -207,6 +207,10 @@
               <button class="button small" id="napcat-token" title="读取 NapCat WebUI 密钥">密钥</button>
               <button class="button small" id="napcat-ws-config" title="配置 NapCat 反向 WebSocket">连接</button>
               <button class="button small danger" id="uninstall-napcat" title="卸载当前 NapCat 版本">卸载</button>
+            </div>
+            <div class="component-actions two" style="margin-top:7px">
+              <button class="button small warn" id="reinstall-napcat-kernel" title="重新安装 Linux QQ 3.2.23-44343">重装内核</button>
+              <button class="button small danger" id="uninstall-napcat-kernel" title="只卸载 Linux QQ 内核">卸载内核</button>
             </div>
           </article>
 
@@ -332,13 +336,20 @@
     </section>
   </main>
 
-  <div class="footer">AstrBot v4.27.3 · NapCat v4.18.28 · ZeroTermux</div>
+  <div class="footer">AstrBot v4.27.3 · NapCat v4.15.0 · ZeroTermux</div>
   <div class="toast" id="toast"></div>
 
   <script>
     const $ = (selector, root = document) => root.querySelector(selector);
     const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-    const state = { instances: [], busy: false, runtimes: {}, tasks: {}, environment: {} };
+    const state = {
+      instances: [],
+      instancesDetecting: false,
+      busy: false,
+      runtimes: {},
+      tasks: {},
+      environment: {}
+    };
     let toastTimer;
 
     function parse(value, fallback = {}) {
@@ -468,9 +479,11 @@
       const list = state.instances || [];
       let running = 0;
       for (const instance of list) {
-        instance.running = Boolean(invoke("portOpen", Number(instance.port)));
+        const port = instancePort(instance);
+        instance.running = port > 0 && Boolean(invoke("portOpen", port));
         if (instance.running) running += 1;
       }
+      state.instancesDetecting = false;
       const runtimes = parse(invoke("loadRuntimeStates"), {});
       state.runtimes = runtimes;
       setRuntimeDetail("#napcat-runtime", runtimes.napcat || {}, "尚未完成部署");
@@ -497,6 +510,15 @@
     }
     function sleep(ms) {
       return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    function nextPaint() {
+      return new Promise(resolve => {
+        if (typeof requestAnimationFrame === "function") {
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        } else {
+          setTimeout(resolve, 0);
+        }
+      });
     }
     function componentForAction(action) {
       if (String(action).includes("napcat")) return "napcat";
@@ -569,6 +591,7 @@
       normalized.username = String(instance.username || "astrbot");
       normalized.password = String(instance.password ?? instance.token ?? "");
       normalized.credentialsConfirmed = Boolean(instance.credentialsConfirmed);
+      normalized.running = null;
       const port = Number(instance.port);
       normalized.port = Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : 0;
       delete normalized.token;
@@ -584,13 +607,23 @@
         String(instance.username || "").trim() &&
         String(instance.password || ""));
     }
-    function loadInstances() {
+    async function loadInstances({ detect = false } = {}) {
       const raw = invoke("loadInstances") || "{\"instances\":[]}";
       const data = parse(raw, { instances: [] });
       state.instances = Array.isArray(data.instances)
         ? data.instances.map(normalizeInstance)
         : [];
+      state.instancesDetecting = Boolean(detect);
+      if (detect) {
+        state.instances.forEach(instance => {
+          instance.running = instancePort(instance) > 0 ? null : false;
+        });
+      }
       renderInstances();
+      if (detect) {
+        await nextPaint();
+        await refreshPorts();
+      }
     }
     function saveInstances() {
       invoke("saveInstances", JSON.stringify({ instances: state.instances }));
@@ -604,12 +637,18 @@
       root.innerHTML = state.instances.map((instance, index) => {
         const port = instancePort(instance);
         const credentials = instanceCredentialsReady(instance);
-        const pillText = instance.running
-          ? "运行中"
-          : (!port
-            ? "待配置端口"
-            : (!instance.credentialsConfirmed ? "待确认账密" : (!credentials ? "待记录账密" : "已停止")));
-        const pillClass = instance.running ? "ok" : (port && !credentials ? "warn" : "bad");
+        const checking = Boolean(
+          port && state.instancesDetecting && instance.running == null);
+        const running = instance.running === true;
+        const stopped = !checking && !running;
+        const pillText = !port
+          ? "待配置端口"
+          : (checking ? "检测中" : (running ? "运行中" : "已停止"));
+        const pillClass = stopped ? "bad" : (checking ? "warn" : "ok");
+        const dotClass = stopped ? "bad" : (checking ? "warn" : "ok");
+        const runtimeText = !port
+          ? "端口未配置"
+          : (checking ? "正在检测运行状态" : (running ? "运行中" : "已停止"));
         const detail = port ? `端口 ${port}` : "端口未配置";
         const account = !instance.credentialsConfirmed
           ? "账密待确认"
@@ -617,10 +656,10 @@
         return `
           <article class="instance-item">
             <div class="instance-head">
-              <span class="status-dot ${instance.running ? "ok" : ""}"></span>
+              <span class="status-dot ${dotClass}"></span>
               <div class="instance-copy">
                 <strong>${escapeHtml(instance.name)}</strong>
-                <span>${detail} · ${account} · ${instance.running ? "运行中" : "已停止"} · ${escapeHtml(instance.id)}</span>
+                <span>${detail} · ${account} · ${runtimeText} · ${escapeHtml(instance.id)}</span>
               </div>
               <span class="pill ${pillClass}">${pillText}</span>
             </div>
@@ -1083,7 +1122,7 @@
       $$(".tab").forEach(tab => tab.classList.toggle("active", tab.dataset.panel === name));
       $$(".panel").forEach(panel => panel.classList.toggle("active", panel.id === `panel-${name}`));
       if (name === "backup") refreshBackups();
-      if (name === "instances") loadInstances();
+      if (name === "instances") loadInstances({ detect: true });
     }
     function parseInlineCommand(command) {
       return { command };
@@ -1113,8 +1152,28 @@
     $("#napcat-webui").onclick = () => invoke("openEdge", "http://127.0.0.1:6099");
     $("#napcat-token").onclick = readNapcatToken;
     $("#napcat-ws-config").onclick = openNapcatWsConfig;
+    $("#reinstall-napcat-kernel").onclick = async () => {
+      if (!confirm("重装 Linux QQ 3.2.23-44343？\n\n会停止 NapCat，删除当前 Linux QQ 内核、QQ 登录态、WebUI 密钥和连接配置，然后重新部署 3.2.23-44343。")) {
+        return;
+      }
+      await runTask(
+        "reinstall-napcat-kernel",
+        {},
+        "重装 Linux QQ 内核",
+        { wait: true, timeoutMs: 30 * 60 * 1000 });
+    };
+    $("#uninstall-napcat-kernel").onclick = async () => {
+      if (!confirm("卸载当前 Linux QQ 内核？\n\n会停止 NapCat，并删除 QQ 登录态、WebUI 密钥和连接配置；NapCat 下载包会保留。")) {
+        return;
+      }
+      await runTask(
+        "uninstall-napcat-kernel",
+        {},
+        "卸载 Linux QQ 内核",
+        { wait: true, timeoutMs: 5 * 60 * 1000 });
+    };
     $("#uninstall-napcat").onclick = async () => {
-      if (!confirm("卸载当前 NapCat？\n\n会停止 NapCat，并删除运行目录、QQ 登录态、WebUI 密钥、反向连接配置和下载缓存。\n\n之后点击“部署/更新”会安装 v4.18.28。")) {
+      if (!confirm("卸载当前 NapCat？\n\n会停止 NapCat，并删除运行目录、QQ 登录态、WebUI 密钥、反向连接配置和下载缓存。\n\n之后点击“部署/更新”会安装 v4.15.0。")) {
         return;
       }
       await runTask(
@@ -1142,7 +1201,7 @@
       $("#activity-log").innerHTML = "<strong>还没有操作。</strong>";
       $("#activity-log").dataset.empty = "1";
     };
-    $("#refresh-instances").onclick = () => { loadInstances(); refreshPorts(); };
+    $("#refresh-instances").onclick = () => loadInstances({ detect: true });
     $("#refresh-backups").onclick = refreshBackups;
     $("#create-instance").onclick = createInstance;
     $("#environment-list").onclick = async event => {
@@ -1170,7 +1229,12 @@
       await refreshEnvironment();
     };
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) refreshEnvironment();
+      if (!document.hidden) {
+        refreshEnvironment();
+        if ($("#panel-instances").classList.contains("active")) {
+          loadInstances({ detect: true });
+        }
+      }
     });
     $("#instance-list").onclick = event => {
       const button = event.target.closest("[data-instance-action]");
@@ -1207,8 +1271,7 @@
     async function boot() {
       invoke("syncBundle");
       await refreshEnvironment();
-      loadInstances();
-      await refreshPorts();
+      await loadInstances({ detect: true });
       await refreshBackups();
       record("管理界面已启动");
       setInterval(refreshPorts, 5000);

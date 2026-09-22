@@ -80,6 +80,17 @@ case "$ACTION" in
     source "$SCRIPT_DIR/deploy_napcat.sh"
     uninstall_napcat
     ;;
+  uninstall-napcat-kernel)
+    ensure_termux_tools
+    source "$SCRIPT_DIR/deploy_napcat.sh"
+    uninstall_napcat_kernel
+    ;;
+  reinstall-napcat-kernel)
+    ensure_termux_tools
+    ensure_storage
+    source "$SCRIPT_DIR/deploy_napcat.sh"
+    reinstall_napcat_kernel
+    ;;
   start-napcat)
     ensure_termux_tools
     source "$SCRIPT_DIR/deploy_napcat.sh"

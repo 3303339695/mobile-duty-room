@@ -102,8 +102,8 @@ if ($LASTEXITCODE -ne 0) { throw "aapt2 compile failed" }
     -A (Join-Path $StageRoot "assets") `
     --min-sdk-version 23 `
     --target-sdk-version 34 `
-    --version-code 24 `
-    --version-name 1.3.6 `
+    --version-code 27 `
+    --version-name 1.3.9 `
     (Join-Path $Build "resources.zip")
 if ($LASTEXITCODE -ne 0) { throw "aapt2 link failed" }
 
@@ -186,7 +186,7 @@ if ($LASTEXITCODE -ne 0) { throw "APK legacy verification failed" }
 
 $Badging = & $Aapt2 dump badging $SignedApk
 if ($LASTEXITCODE -ne 0) { throw "APK badging verification failed" }
-if (-not ($Badging -match "package: name='com\.zhibanshi\.mobile\.dutyroom' versionCode='24' versionName='1\.3\.6'")) {
+if (-not ($Badging -match "package: name='com\.zhibanshi\.mobile\.dutyroom' versionCode='27' versionName='1\.3\.9'")) {
     throw "Unexpected APK package or version metadata"
 }
 if (-not ($Badging -match "targetSdkVersion:'34'")) {
