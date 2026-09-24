@@ -82,7 +82,7 @@ deploy_napcat() {
     apt-get update
     apt-get install -y ca-certificates curl unzip jq python3 xvfb dbus-x11 \
       libasound2 libgbm1 libnss3 libxss1 libxshmfence1 libgtk-3-0 \
-      libx11-xcb1 libxcb-dri3-0 libdrm2 fonts-noto-cjk
+      libx11-xcb1 libxcb-dri3-0 libdrm2 fonts-noto-cjk squashfs-tools
     apt-get install -y libxtst6 xdg-utils libatspi2.0-0 libsecret-1-0 \
       libnotify4 || true
     apt-get install -y libappindicator3-1 \
@@ -98,87 +98,31 @@ deploy_napcat() {
     "$NAPCAT_SHA256"
   [ -s "$napcat_archive" ] || die "NapCat Shell 安装包尚未就绪"
 
-  local qq_url qq_urls=() qq_ready=0
+  local qq_archive qq_ready=0
   if [ -s "$base/opt/QQ/qq" ]; then
-    warn "当前运行组合不是完整目标版本，删除旧内核 $REQUIRED_QQ_VERSION 后重新准备"
+    warn "当前运行组合不完整或不是目标版本，删除旧内核后重新准备 $REQUIRED_QQ_VERSION"
   fi
   rm -rf "$base"
-  mkdir -p "$base"
-  log "从 $NAPCAT_QQ_DOCKER_REPOSITORY:$NAPCAT_QQ_DOCKER_TAG 准备 Linux QQ arm64 运行内核"
+  mkdir -p "$base/opt"
+  qq_archive="$DOWNLOAD_DIR/QQ-${REQUIRED_QQ_BUILD}_NapCat-v4.18.13-arm64.AppImage"
+  download_file \
+    "$NAPCAT_QQ_APPIMAGE_URL" \
+    "$qq_archive" \
+    "$NAPCAT_QQ_APPIMAGE_SHA256"
+  [ -s "$qq_archive" ] || die "Linux QQ AppImage 尚未就绪"
+
+  log "从官方 ARM64 AppImage 提取 Linux QQ $REQUIRED_QQ_VERSION"
   if debian_shell "
     set -e
-    python3 /opt/zhibanshi/bin/fetch_napcat_qq_docker.py \
-      --repository '${NAPCAT_QQ_DOCKER_REPOSITORY}' \
-      --tag '${NAPCAT_QQ_DOCKER_TAG}' \
-      --manifest-digest '${NAPCAT_QQ_DOCKER_MANIFEST_DIGEST}' \
-      --layer-digest '${NAPCAT_QQ_DOCKER_LAYER_DIGEST}' \
-      --output '/opt/zhibanshi/runtime/napcat' \
-      --cache '/opt/zhibanshi/downloads'
+    python3 /opt/zhibanshi/bin/extract_appimage_qq.py \
+      --archive '/opt/zhibanshi/downloads/$(basename "$qq_archive")' \
+      --output '/opt/zhibanshi/runtime/napcat/opt/QQ' \
+      --expected-version '${REQUIRED_QQ_VERSION}'
   " && qq_kernel_supported; then
     qq_ready=1
   fi
-
-  if [ "$qq_ready" -ne 1 ]; then
-    rm -rf "$base"
-    mkdir -p "$base"
-    warn "固定镜像不可用，尝试从 $NAPCAT_QQ_FALLBACK_REPOSITORY:$NAPCAT_QQ_FALLBACK_TAG 恢复内核"
-    if debian_shell "
-      set -e
-      python3 /opt/zhibanshi/bin/fetch_napcat_qq_docker.py \
-        --repository '${NAPCAT_QQ_FALLBACK_REPOSITORY}' \
-        --tag '${NAPCAT_QQ_FALLBACK_TAG}' \
-        --output '/opt/zhibanshi/runtime/napcat' \
-        --cache '/opt/zhibanshi/downloads'
-    " && qq_kernel_supported; then
-      qq_ready=1
-    fi
-  fi
-
-  if [ "$qq_ready" -ne 1 ]; then
-    warn "Docker 镜像暂不可用，改用腾讯 Linux QQ arm64 安装包"
-  fi
-
-  if [ "$qq_ready" -ne 1 ]; then
-    rm -rf "$base"
-    mkdir -p "$base"
-    while IFS= read -r candidate; do
-      [ -n "$candidate" ] && qq_urls+=("$candidate")
-    done < <(debian_shell \
-      'python3 /opt/zhibanshi/bin/resolve_linux_qq.py' \
-      2>/dev/null || true)
-    if [ "${#qq_urls[@]}" -eq 0 ]; then
-      die "未解析到 Linux QQ $REQUIRED_QQ_VERSION 的 arm64 安装包，已停止部署以避免安装错误版本"
-    fi
-    for qq_url in "${qq_urls[@]}"; do
-      log "Linux QQ 包：$qq_url"
-      if ! download_file "$qq_url" "$DOWNLOAD_DIR/linuxqq-arm64.deb" "" 1; then
-        continue
-      fi
-      if ! debian_shell \
-        'dpkg-deb --info /opt/zhibanshi/downloads/linuxqq-arm64.deb >/dev/null 2>&1'; then
-        warn "下载内容不是有效的 Linux QQ arm64 安装包，继续尝试备用地址"
-        rm -f "$DOWNLOAD_DIR/linuxqq-arm64.deb" 2>/dev/null || true
-        continue
-      fi
-      log "解压 Linux QQ 安装包"
-      if debian_shell "
-        set -e
-        rm -rf '/opt/zhibanshi/runtime/napcat'
-        mkdir -p '/opt/zhibanshi/runtime/napcat'
-        dpkg-deb -x '/opt/zhibanshi/downloads/linuxqq-arm64.deb' \
-          '/opt/zhibanshi/runtime/napcat'
-      " && qq_kernel_supported; then
-        qq_ready=1
-        break
-      fi
-      warn "该安装包内核 $(qq_kernel_version) 与要求 $REQUIRED_QQ_VERSION 不一致，继续尝试备用地址"
-      rm -rf "$base"
-      mkdir -p "$base"
-      rm -f "$DOWNLOAD_DIR/linuxqq-arm64.deb" 2>/dev/null || true
-    done
-  fi
   [ "$qq_ready" -eq 1 ] || \
-    die "Linux QQ 运行内核不是要求的 $REQUIRED_QQ_VERSION，请检查网络后重试部署"
+    die "Linux QQ 运行内核不是要求的 $REQUIRED_QQ_VERSION，已停止部署"
 
   debian_shell \
     "test -s '/opt/zhibanshi/downloads/$(basename "$napcat_archive")'" || \
@@ -265,6 +209,8 @@ uninstall_napcat() {
     "$CONFIG_DIR/napcat-reverse-ws.json" \
     "$HOME_ROOT/config/napcat-reverse-ws-state.json" 2>/dev/null || true
   rm -f "$DOWNLOAD_DIR"/NapCat.Shell.v*.zip \
+    "$DOWNLOAD_DIR"/QQ-*_NapCat-*-arm64.AppImage \
+    "$DOWNLOAD_DIR"/linuxqq-arm64.deb \
     "$DOWNLOAD_DIR"/napcat-qq-*.tar.gz 2>/dev/null || true
   ok "NapCat 运行目录、登录态和 WebUI 配置已删除"
   warn "重新点击“部署/更新”会安装 v$NAPCAT_VERSION"

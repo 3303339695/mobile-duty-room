@@ -194,7 +194,7 @@
         <div class="component-grid">
           <article class="surface component-card">
             <div class="component-top">
-              <div class="component-title"><strong>NapCat QQ</strong><span>v4.15.0 · Linux QQ 3.2.23-44343 · o3HookMode 0 · WebUI 6099</span><span class="runtime-state" id="napcat-runtime">正在检查安装状态</span></div>
+              <div class="component-title"><strong>NapCat QQ</strong><span>v4.18.19 · Linux QQ 3.2.30-50969 · o3HookMode 0 · WebUI 6099</span><span class="runtime-state" id="napcat-runtime">正在检查安装状态</span></div>
               <span class="pill" id="napcat-status">检查中</span>
             </div>
             <div class="component-actions">
@@ -209,7 +209,7 @@
               <button class="button small danger" id="uninstall-napcat" title="卸载当前 NapCat 版本">卸载</button>
             </div>
             <div class="component-actions two" style="margin-top:7px">
-              <button class="button small warn" id="reinstall-napcat-kernel" title="重新安装 Linux QQ 3.2.23-44343">重装内核</button>
+              <button class="button small warn" id="reinstall-napcat-kernel" title="重新安装 Linux QQ 3.2.30-50969">重装内核</button>
               <button class="button small danger" id="uninstall-napcat-kernel" title="只卸载 Linux QQ 内核">卸载内核</button>
             </div>
           </article>
@@ -336,7 +336,7 @@
     </section>
   </main>
 
-  <div class="footer">AstrBot v4.27.3 · NapCat v4.15.0 · ZeroTermux</div>
+  <div class="footer">AstrBot v4.27.3 · NapCat v4.18.19 · ZeroTermux</div>
   <div class="toast" id="toast"></div>
 
   <script>
@@ -1153,7 +1153,7 @@
     $("#napcat-token").onclick = readNapcatToken;
     $("#napcat-ws-config").onclick = openNapcatWsConfig;
     $("#reinstall-napcat-kernel").onclick = async () => {
-      if (!confirm("重装 Linux QQ 3.2.23-44343？\n\n会停止 NapCat，删除当前 Linux QQ 内核、QQ 登录态、WebUI 密钥和连接配置，然后重新部署 3.2.23-44343。")) {
+      if (!confirm("重装 Linux QQ 3.2.30-50969？\n\n会停止 NapCat，删除当前 Linux QQ 内核、QQ 登录态、WebUI 密钥和连接配置，然后重新部署 3.2.30-50969。")) {
         return;
       }
       await runTask(
@@ -1173,7 +1173,7 @@
         { wait: true, timeoutMs: 5 * 60 * 1000 });
     };
     $("#uninstall-napcat").onclick = async () => {
-      if (!confirm("卸载当前 NapCat？\n\n会停止 NapCat，并删除运行目录、QQ 登录态、WebUI 密钥、反向连接配置和下载缓存。\n\n之后点击“部署/更新”会安装 v4.15.0。")) {
+      if (!confirm("卸载当前 NapCat？\n\n会停止 NapCat，并删除运行目录、QQ 登录态、WebUI 密钥、反向连接配置和下载缓存。\n\n之后点击“部署/更新”会安装 v4.18.19。")) {
         return;
       }
       await runTask(

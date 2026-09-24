@@ -41,6 +41,7 @@ cleanup_download_residue() {
     -delete 2>/dev/null || true
   rm -f "$DOWNLOAD_DIR"/linuxqq-arm64.deb 2>/dev/null || true
   rm -f "$DOWNLOAD_DIR"/NapCat.Shell.v*.zip 2>/dev/null || true
+  rm -f "$DOWNLOAD_DIR"/QQ-*_NapCat-*-arm64.AppImage 2>/dev/null || true
   rm -f "$DOWNLOAD_DIR"/napcat-qq-*.tar.gz 2>/dev/null || true
   rm -rf "$HOME_ROOT/tmp" 2>/dev/null || true
   mkdir -p "$HOME_ROOT/tmp"
