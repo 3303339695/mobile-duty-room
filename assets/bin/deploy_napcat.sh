@@ -139,6 +139,8 @@ deploy_napcat() {
     chmod -R +x \"\$target/napcat\"
     printf '%s\n' \"(async () => {await import('file:///opt/zhibanshi/runtime/napcat/opt/QQ/resources/app/app_launcher/napcat/napcat.mjs');})();\" \
       > '/opt/zhibanshi/runtime/napcat/opt/QQ/resources/app/loadNapCat.js'
+    python3 /opt/zhibanshi/bin/patch_napcat_reply.py \
+      '/opt/zhibanshi/runtime/napcat/opt/QQ/resources/app/app_launcher/napcat/napcat.mjs'
     jq '.main = \"./loadNapCat.js\"' \
       '/opt/zhibanshi/runtime/napcat/opt/QQ/resources/app/package.json' \
       > /tmp/qq-package.json
@@ -173,16 +175,24 @@ start_napcat() {
   echo "NapCat 目录: $(napcat_root)"
   echo "WebUI: http://127.0.0.1:6099"
   echo "============================================================"
+  mkdir -p "$HOME_ROOT/logs"
+  ensure_watchdog
+  printf '%s\n' "$(wc -c < "$PUBLIC_ROOT/logs/napcat.log" 2>/dev/null || printf '0')" \
+    > "$HOME_ROOT/config/watchdog-napcat.log.offset"
+  touch "$HOME_ROOT/config/desired-napcat"
   echo $$ > "$pid_file"
   exec proot-distro login "$NAPCAT_ALIAS" \
     --bind "$HOME_ROOT:/opt/zhibanshi" \
-    -- /bin/bash -lc "exec /opt/zhibanshi/bin/start_napcat_inner.sh"
+    --bind "$PUBLIC_ROOT:/opt/zhibanshi-public" \
+    -- /bin/bash -lc "export TZ=Asia/Shanghai; exec /opt/zhibanshi/bin/start_napcat_inner.sh" \
+    >> "$PUBLIC_ROOT/logs/napcat.log" 2>&1
 }
 
 stop_napcat() {
   local pid_file
   pid_file="$(napcat_pid_file)"
   log "停止 NapCat"
+  rm -f "$HOME_ROOT/config/desired-napcat" 2>/dev/null || true
   stop_pid_file "$pid_file" '/opt/zhibanshi/runtime/napcat/opt/QQ/qq'
   pkill -TERM -f 'xvfb-run.*/opt/zhibanshi/runtime/napcat' 2>/dev/null || true
   if is_port_open 6099; then

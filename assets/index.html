@@ -145,6 +145,10 @@
     .warning { padding: 11px 12px; background: #271430; border: 1px solid #65417d; color: #f2d7ff; border-radius: var(--radius); font-size: 13px; line-height: 1.5; }
     .activity { padding: 12px; color: var(--muted); font-size: 13px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
     .activity strong { color: var(--text); }
+    .log-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; padding: 8px; border-bottom: 1px solid var(--line); }
+    .log-tab { min-height: 34px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .log-tab.active { background: var(--surface-2); border-color: var(--line); color: var(--text); }
+    .log-view { min-height: 300px; max-height: 62vh; overflow: auto; padding: 12px; background: #0b0610; color: #d9cee1; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
     .footer { color: #667586; text-align: center; font-size: 11px; margin-top: 18px; }
 
     .toast {
@@ -179,14 +183,15 @@
     <button class="tab active" data-panel="home">总览</button>
     <button class="tab" data-panel="instances">实例</button>
     <button class="tab" data-panel="backup">备份</button>
-    <button class="tab" data-panel="activity">动态</button>
+    <button class="tab" data-panel="activity">日志</button>
   </nav>
 
   <main>
     <section class="panel active" id="panel-home">
       <div class="section">
-        <div class="section-head"><h2>运行条件</h2><span class="hint">点状态行右侧修复</span></div>
+        <div class="section-head"><h2>运行条件</h2><span class="hint">备用值守建议保持全部完成</span></div>
         <div class="surface status-list" id="environment-list"></div>
+        <div class="field-help" style="padding:10px 12px 0">手机端适合在电脑暂时不可用时值守一上午或一个白天；QQ 被踢下线后会停止 NapCat 保护，不会自动反复登录。</div>
       </div>
 
       <div class="section">
@@ -226,7 +231,7 @@
             </div>
             <div class="component-actions two" style="margin-top:7px">
               <button class="button small" id="minilm-test">测试接口</button>
-              <button class="button small" data-action="minilm-config" data-label="查看 MiniLM 配置">查看配置</button>
+              <button class="button small" id="minilm-config">查看配置</button>
             </div>
           </article>
 
@@ -258,6 +263,9 @@
           </button>
           <button class="button" id="battery-permission">
             <svg viewBox="0 0 24 24"><rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10v4"/><path d="M7 10v4"/><path d="M11 10v4"/></svg>后台保活
+          </button>
+          <button class="button primary" id="auto-permissions">
+            <svg viewBox="0 0 24 24"><path d="M12 3v4"/><path d="M12 17v4"/><path d="M3 12h4"/><path d="M17 12h4"/><path d="m7 7 2.5 2.5"/><path d="m14.5 14.5 2.5 2.5"/><path d="m17 7-2.5 2.5"/><path d="m9.5 14.5L7 17"/></svg>自动申请权限
           </button>
           <button class="button warn" id="cleanup-cache">
             <svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>停服务并清缓存
@@ -317,20 +325,15 @@
 
     <section class="panel" id="panel-activity">
       <div class="section">
-        <div class="section-head"><h2>操作记录</h2><button class="button small ghost" id="clear-activity">清空</button></div>
-        <div class="surface"><div class="activity" id="activity-log" data-empty="1"><strong>还没有操作。</strong></div></div>
-      </div>
-      <div class="section">
-        <div class="section-head"><h2>MiniLM 对接参数</h2></div>
-        <div class="surface config-grid">
-          <div class="key">ID</div><div class="value">local_minilm_embedding</div>
-          <div class="key">API Key</div><div class="value">local-minilm</div>
-          <div class="key">API Base URL</div><div class="value">http://127.0.0.1:8000/v1</div>
-          <div class="key">嵌入模型</div><div class="value">paraphrase-multilingual-MiniLM-L12-v2</div>
-          <div class="key">嵌入维度</div><div class="value">384</div>
-          <div class="key">维度模式</div><div class="value">always</div>
-          <div class="key">超时时间</div><div class="value">60 秒</div>
-          <div class="key">代理地址</div><div class="value">留空</div>
+        <div class="section-head"><h2>后台日志</h2><div style="display:flex;gap:7px"><button class="button small ghost" id="refresh-logs">刷新</button><button class="button small ghost" id="clear-log">清空</button></div></div>
+        <div class="surface">
+          <div class="log-tabs" id="log-tabs">
+            <button class="log-tab active" data-log="app">应用全局</button>
+            <button class="log-tab" data-log="napcat">NapCat</button>
+            <button class="log-tab" data-log="astrbot">AstrBot</button>
+            <button class="log-tab" data-log="minilm">MiniLM</button>
+          </div>
+          <div class="log-view" id="log-view">正在读取日志...</div>
         </div>
       </div>
     </section>
@@ -351,6 +354,8 @@
       environment: {}
     };
     let toastTimer;
+    let activeLog = "app";
+    let logCache = {};
 
     function parse(value, fallback = {}) {
       try { return JSON.parse(value); } catch (_) { return fallback; }
@@ -372,12 +377,43 @@
       toastTimer = setTimeout(() => toast.classList.remove("show"), 2400);
     }
     function record(message) {
-      const log = $("#activity-log");
+      const log = $("#log-view");
       const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
-      const line = document.createElement("div");
-      line.innerHTML = `<strong>${time}</strong>  ${escapeHtml(message)}`;
-      if (log.dataset.empty === "1") { log.innerHTML = ""; log.dataset.empty = "0"; }
-      log.prepend(line);
+      const line = `[${time}] ${message}`;
+      logCache.app = `${line}\n${logCache.app || ""}`.trim();
+      if (activeLog === "app") renderActiveLog();
+    }
+    function renderActiveLog() {
+      const view = $("#log-view");
+      if (!view) return;
+      view.textContent = logCache[activeLog] || "暂无日志";
+      view.scrollTop = view.scrollHeight;
+    }
+    function refreshLogs() {
+      const data = parse(invoke("loadLogs"), {});
+      logCache = { ...logCache, ...data };
+      renderActiveLog();
+    }
+    function openMiniLmConfig() {
+      const dialog = document.createElement("div");
+      dialog.style.cssText = "position:fixed;inset:0;background:#000d;z-index:90;display:grid;place-items:center;padding:18px";
+      dialog.innerHTML = `
+        <div style="width:100%;max-width:500px;background:#151b23;border:1px solid #2c3644;border-radius:10px;padding:16px">
+          <h3 style="margin:0 0 10px;font-size:18px">MiniLM 对接参数</h3>
+          <div class="surface config-grid">
+            <div class="key">ID</div><div class="value">local_minilm_embedding</div>
+            <div class="key">API Key</div><div class="value">local-minilm</div>
+            <div class="key">API Base URL</div><div class="value">http://127.0.0.1:8000/v1</div>
+            <div class="key">嵌入模型</div><div class="value">paraphrase-multilingual-MiniLM-L12-v2</div>
+            <div class="key">嵌入维度</div><div class="value">384</div>
+            <div class="key">维度模式</div><div class="value">always</div>
+            <div class="key">超时时间</div><div class="value">60 秒</div>
+            <div class="key">代理地址</div><div class="value">留空</div>
+          </div>
+          <button class="button primary" id="close-minilm-config" style="width:100%;margin-top:14px">关闭</button>
+        </div>`;
+      document.body.append(dialog);
+      $("#close-minilm-config", dialog).onclick = () => dialog.remove();
     }
     function invoke(name, ...args) {
       if (!window.Android || typeof Android[name] !== "function") {
@@ -387,6 +423,13 @@
       try { return Android[name](...args); }
       catch (error) { showToast(String(error)); return null; }
     }
+    document.addEventListener("click", event => {
+      const button = event.target.closest("#auto-permissions");
+      if (!button) return;
+      record("开始自动申请系统权限");
+      showToast("正在启动权限检查");
+      invoke("startPermissionWizard");
+    });
     function storageOk(env) {
       return Boolean(env.storage && (
         env.storage.folderGranted || env.storage.allFiles || env.storage.legacyWrite));
@@ -451,7 +494,7 @@
       const termuxCommand = Boolean(env.termuxCommand);
       const termuxPermission = env.termuxPermission || {};
       const permissionDetail = termuxCommand
-        ? "运行权限已允许，可以启动终端会话"
+        ? "运行权限已允许，可以启动后台任务"
         : termuxPermission.declared === false
           ? termux
             ? "ZeroTermux 未声明 RUN_COMMAND 权限"
@@ -754,7 +797,7 @@
           return status;
         }
       }
-      return { state: "timeout", message: "执行时间较长，请到终端会话查看进度" };
+      return { state: "timeout", message: "执行时间较长，请查看后台日志" };
     }
     async function trackTask(task) {
       const status = await waitForTask(task.request, task.timeoutMs);
@@ -768,9 +811,9 @@
       } else if (status.state === "failed") {
         const line = status.line ? `第 ${status.line} 行` : "未知位置";
         if (!task.silent) record(`${task.label}：失败（${line}，退出码 ${status.code || "未知"}）`);
-        if (!task.silent) showToast(`${task.label}失败，请查看终端会话`);
+        if (!task.silent) showToast(`${task.label}失败，请查看后台日志`);
       } else {
-        if (!task.silent) record(`${task.label}：仍在执行，${status.message || "请查看终端会话"}`);
+        if (!task.silent) record(`${task.label}：仍在执行，${status.message || "请查看后台日志"}`);
       }
       await refreshPorts();
       await refreshEnvironment();
@@ -786,8 +829,8 @@
       if (result.ok) {
         const component = componentForAction(action);
         if (component) state.tasks[component] = { state: "running" };
-        if (!options.silent) record(`${label || action}：已提交到终端会话，正在执行`);
-        if (!options.silent) showToast("已打开 ZeroTermux 会话");
+        if (!options.silent) record(`${label || action}：已提交后台任务，正在执行`);
+        if (!options.silent) showToast("已提交后台任务");
         refreshRuntimeStates();
         if (component === "bootstrap") await refreshEnvironment();
         if (options.wait) {
@@ -803,7 +846,7 @@
           }
           if (status.state !== "failed") {
             if (!options.silent) {
-              record(`${label || action}：未收到完成确认，${status.message || "请查看终端会话"}`);
+              record(`${label || action}：未收到完成确认，${status.message || "请查看后台日志"}`);
             }
             return { ok: false, request: result.request, ...status };
           }
@@ -897,7 +940,7 @@
         }
         if (!ready) {
           record(`导入备份-${instance.name}：实例未在 60 秒内就绪`);
-          showToast("实例尚未就绪，请先查看终端会话");
+          showToast("实例尚未就绪，请先查看后台日志");
           return;
         }
         await runTask("import-astrbot", {
@@ -998,8 +1041,8 @@
       dialog.style.cssText = "position:fixed;inset:0;background:#000d;z-index:88;display:grid;place-items:center;padding:16px;overflow:auto";
       dialog.innerHTML = `
         <div style="width:100%;max-width:560px;max-height:92vh;overflow:auto;background:#151b23;border:1px solid #2c3644;border-radius:10px;padding:16px">
-          <h3 style="margin:0 0 6px;font-size:18px">NapCat 反向 WS 连接</h3>
-          <div style="color:#b8a7c4;font-size:12px;margin-bottom:14px">只更新值班室管理的连接，手动连接不会被覆盖。</div>
+          <h3 style="margin:0 0 6px;font-size:18px">编辑 WS 反向客户端</h3>
+          <div style="color:#b8a7c4;font-size:12px;margin-bottom:14px">修改后会写回 NapCat 的反向 WS 客户端配置；其他手动连接不会被覆盖。保存时会自动重启正在运行的 NapCat。</div>
           <div class="field">
             <label for="napcat-ws-name">连接名称</label>
             <input id="napcat-ws-name" maxlength="64" value="${value("name", "值班室-AstrBot")}">
@@ -1042,7 +1085,7 @@
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px">
             <button class="button ghost" id="cancel-napcat-ws">取消</button>
-            <button class="button primary" id="save-napcat-ws">写入连接</button>
+            <button class="button primary" id="save-napcat-ws">保存并更新 NapCat</button>
           </div>
         </div>`;
       document.body.append(dialog);
@@ -1074,7 +1117,7 @@
           "配置 NapCat 反向 WS",
           { wait: true, timeoutMs: 5 * 60 * 1000 });
         if (!task || !task.ok) {
-          showToast("连接配置写入失败，请查看终端会话");
+          showToast("连接配置写入失败，请查看后台日志");
           return;
         }
         const savedRaw = String(invoke("readNapcatReverseWsConfig") || "").replace(/^\uFEFF/, "");
@@ -1108,7 +1151,7 @@
       });
       if (!result || !result.ok) {
         record(`创建-${name}：未成功，实例未加入列表`);
-        showToast("实例创建未完成，请查看终端会话");
+        showToast("实例创建未完成，请查看后台日志");
         return;
       }
       state.instances.push(instance);
@@ -1197,9 +1240,20 @@
       showToast(result.ok ? "MiniLM 服务可访问" : "MiniLM 尚未启动");
       record(`MiniLM 接口测试：${result.ok ? "成功" : "失败"}`);
     };
-    $("#clear-activity").onclick = () => {
-      $("#activity-log").innerHTML = "<strong>还没有操作。</strong>";
-      $("#activity-log").dataset.empty = "1";
+    $("#minilm-config").onclick = openMiniLmConfig;
+    $("#refresh-logs").onclick = refreshLogs;
+    $("#clear-log").onclick = () => {
+      invoke("clearLog", activeLog);
+      logCache[activeLog] = "";
+      renderActiveLog();
+      showToast("日志已清空");
+    };
+    $("#log-tabs").onclick = event => {
+      const button = event.target.closest("[data-log]");
+      if (!button) return;
+      activeLog = button.dataset.log;
+      $$(".log-tab").forEach(tab => tab.classList.toggle("active", tab === button));
+      refreshLogs();
     };
     $("#refresh-instances").onclick = () => loadInstances({ detect: true });
     $("#refresh-backups").onclick = refreshBackups;
@@ -1274,7 +1328,11 @@
       await loadInstances({ detect: true });
       await refreshBackups();
       record("管理界面已启动");
+      refreshLogs();
       setInterval(refreshPorts, 5000);
+      setInterval(() => {
+        if ($("#panel-activity").classList.contains("active")) refreshLogs();
+      }, 3000);
     }
     boot();
   </script>

@@ -20,6 +20,7 @@ fi
 export TASK_STATUS_FILE
 task_status_running "任务已开始"
 
+exec > >(tee -a "$LOG_DIR/app.log") 2>&1
 log "任务：$ACTION"
 log "组件目录：$HOME_ROOT"
 
@@ -130,6 +131,10 @@ case "$ACTION" in
     source "$SCRIPT_DIR/deploy_minilm.sh"
     task_status_launched "MiniLM 会话已启动"
     start_minilm
+    ;;
+  start-watchdog)
+    ensure_watchdog
+    task_status_launched "后台服务守护已启动"
     ;;
   stop-minilm)
     ensure_termux_tools

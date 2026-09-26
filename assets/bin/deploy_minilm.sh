@@ -130,23 +130,29 @@ start_minilm() {
   echo "接口: http://127.0.0.1:8000/v1"
   echo "离线模式: HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1"
   echo "============================================================"
+  mkdir -p "$HOME_ROOT/logs"
+  ensure_watchdog
+  touch "$HOME_ROOT/config/desired-minilm"
   echo $$ > "$pid_file"
   exec proot-distro login "$UBUNTU_ALIAS" \
     --bind "$HOME_ROOT:/opt/zhibanshi" \
+    --bind "$PUBLIC_ROOT:/opt/zhibanshi-public" \
     -- /bin/bash -lc "
+      export TZ=Asia/Shanghai
       export HF_HUB_OFFLINE=1
       export TRANSFORMERS_OFFLINE=1
       export PYTHONUNBUFFERED=1
       exec /root/minilm-venv/bin/python /opt/zhibanshi/bin/minilm_server.py \
         --model '/opt/zhibanshi/models/$MINILM_MODEL' \
         --host 127.0.0.1 --port 8000 --api-key local-minilm
-    "
+    " >> "$PUBLIC_ROOT/logs/minilm.log" 2>&1
 }
 
 stop_minilm() {
   local pid_file
   pid_file="$(minilm_pid_file)"
   log "停止 MiniLM 服务"
+  rm -f "$HOME_ROOT/config/desired-minilm" 2>/dev/null || true
   stop_pid_file "$pid_file" '/opt/zhibanshi/bin/minilm_server.py'
   if is_port_open 8000; then
     warn "MiniLM 端口 8000 仍在监听"

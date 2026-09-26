@@ -186,7 +186,7 @@ def main():
         ),
         None,
     )
-    exact_matches = []
+    managed_matches = []
     if previous:
         for item in clients:
             try:
@@ -195,13 +195,13 @@ def main():
                 same_url = False
             same_name = str(item.get("name") or "") == str(previous.get("name") or "")
             same_token = token_hash(item.get("token")) == previous.get("tokenHash")
-            if same_name and same_url and same_token:
-                exact_matches.append(item)
+            if (same_name and same_url) or (same_url and same_token) or (same_name and same_token):
+                managed_matches.append(item)
 
     removed = 0
-    if exact_matches:
-        entry = exact_matches[0]
-        for duplicate in exact_matches[1:]:
+    if managed_matches:
+        entry = managed_matches[0]
+        for duplicate in managed_matches[1:]:
             clients.remove(duplicate)
             removed += 1
         if not token:
@@ -280,7 +280,7 @@ def main():
     print(f"连接地址：{entry['url']}")
     print(f"清理值班室重复项：{removed}")
     print(f"保留其他/手动连接：{manual_count}")
-    if exact_matches:
+    if managed_matches:
         print("写入方式：更新值班室管理的连接")
     else:
         print("写入方式：新增值班室管理的连接，未覆盖手动连接")

@@ -68,6 +68,7 @@ public class MainActivity extends Activity {
     private static final String EXTRA_ARGUMENTS = "com.termux.RUN_COMMAND_ARGUMENTS";
     private static final String EXTRA_WORKDIR = "com.termux.RUN_COMMAND_WORKDIR";
     private static final String EXTRA_RUNNER = "com.termux.RUN_COMMAND_RUNNER";
+    private static final String EXTRA_BACKGROUND = "com.termux.RUN_COMMAND_BACKGROUND";
     private static final String EXTRA_SESSION_ACTION = "com.termux.RUN_COMMAND_SESSION_ACTION";
     private static final String EXTRA_SHELL_NAME = "com.termux.RUN_COMMAND_SHELL_NAME";
     private static final String EXTRA_SHELL_CREATE_MODE = "com.termux.RUN_COMMAND_SHELL_CREATE_MODE";
@@ -79,9 +80,12 @@ public class MainActivity extends Activity {
     private static final String PREF_BACKUP_TREE = "backup_tree";
     private static final String PREF_TERMUX_PERMISSION_REQUESTED =
             "termux_permission_requested";
+    private static final String PREF_PERMISSION_WIZARD_STAGE =
+            "permission_wizard_stage";
     private static final int REQUEST_PUBLIC_STORAGE = 4101;
     private static final int REQUEST_BACKUP_STORAGE = 4102;
     private static final int REQUEST_TERMUX_PERMISSION = 4103;
+    private static final int REQUEST_NOTIFICATIONS = 4104;
 
     private WebView webView;
     private File publicRoot;
@@ -120,6 +124,8 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new Bridge(), "Android");
         setContentView(webView);
         webView.loadUrl("file:///android_asset/index.html");
+        DutyRoomGuardService.start(this);
+        requestNotificationPermission();
     }
 
     private Uri parseStoredUri(String key) {
@@ -195,14 +201,110 @@ public class MainActivity extends Activity {
             preferences.edit().putString(PREF_BACKUP_TREE, uri.toString()).apply();
             Toast.makeText(this, "备份文件夹已授权", Toast.LENGTH_SHORT).show();
         }
+        if (requestCode == REQUEST_PUBLIC_STORAGE
+                && preferences.getInt(PREF_PERMISSION_WIZARD_STAGE, 0) == 4) {
+            continuePermissionWizard();
+        }
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        DutyRoomGuardService.start(this);
+        continuePermissionWizard();
         if (webView != null) {
             webView.evaluateJavascript(
                     "typeof refreshEnvironment === 'function' && refreshEnvironment()", null);
+        }
+    }
+
+    private void requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{"android.permission.POST_NOTIFICATIONS"},
+                    REQUEST_NOTIFICATIONS);
+        }
+    }
+
+    private boolean hasNotificationPermission() {
+        return Build.VERSION.SDK_INT < 33
+                || checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void startPermissionWizard() {
+        Toast.makeText(this, "正在检查并申请系统权限", Toast.LENGTH_SHORT).show();
+        preferences.edit().putInt(PREF_PERMISSION_WIZARD_STAGE, 1).apply();
+        continuePermissionWizard();
+    }
+
+    private void finishPermissionWizard() {
+        preferences.edit().remove(PREF_PERMISSION_WIZARD_STAGE).apply();
+        Toast.makeText(this, "权限检查流程已完成，请查看运行条件状态", Toast.LENGTH_LONG).show();
+        if (webView != null) {
+            webView.evaluateJavascript(
+                    "typeof refreshEnvironment === 'function' && refreshEnvironment()", null);
+        }
+    }
+
+    private void continuePermissionWizard() {
+        int stage = preferences.getInt(PREF_PERMISSION_WIZARD_STAGE, 0);
+        if (stage == 0) {
+            return;
+        }
+        if (stage <= 1) {
+            if (!hasNotificationPermission() && Build.VERSION.SDK_INT >= 33) {
+                preferences.edit().putInt(PREF_PERMISSION_WIZARD_STAGE, 2).apply();
+                requestPermissions(
+                        new String[]{"android.permission.POST_NOTIFICATIONS"},
+                        REQUEST_NOTIFICATIONS);
+                return;
+            }
+            stage = 2;
+            preferences.edit().putInt(PREF_PERMISSION_WIZARD_STAGE, stage).apply();
+        }
+        if (stage <= 2) {
+            if (!hasTermuxCommandPermission() && isPackageInstalled(TERMUX_PACKAGE)) {
+                preferences.edit().putInt(PREF_PERMISSION_WIZARD_STAGE, 3).apply();
+                requestTermuxCommandPermission();
+                return;
+            }
+            stage = 3;
+            preferences.edit().putInt(PREF_PERMISSION_WIZARD_STAGE, stage).apply();
+        }
+        if (stage <= 3) {
+            if (!storageState().optBoolean("folderGranted", false)) {
+                preferences.edit().putInt(PREF_PERMISSION_WIZARD_STAGE, 4).apply();
+                chooseStorageFolder(false);
+                return;
+            }
+            stage = 4;
+            preferences.edit().putInt(PREF_PERMISSION_WIZARD_STAGE, stage).apply();
+        }
+        if (stage <= 4) {
+            if (Build.VERSION.SDK_INT >= 23) {
+                PowerManager power = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (power != null && !power.isIgnoringBatteryOptimizations(getPackageName())) {
+                    preferences.edit().putInt(PREF_PERMISSION_WIZARD_STAGE, 5).apply();
+                    Intent intent = new Intent(
+                            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    intent.setData(Uri.parse("package:" + getPackageName()));
+                    openExternal(intent, "无法打开电池优化设置");
+                    return;
+                }
+            }
+            stage = 5;
+            preferences.edit().putInt(PREF_PERMISSION_WIZARD_STAGE, stage).apply();
+        }
+        if (stage <= 6) {
+            if (isPackageInstalled(TERMUX_PACKAGE) && !canTermuxDrawOverlays()) {
+                preferences.edit().putInt(PREF_PERMISSION_WIZARD_STAGE, 6).apply();
+                openSettings("termux_overlay");
+                return;
+            }
+            finishPermissionWizard();
         }
     }
 
@@ -229,6 +331,12 @@ public class MainActivity extends Activity {
                 reportTermuxPermissionResult(denied.toString());
                 showTermuxPermissionDialog("系统权限请求已返回，但权限仍未允许。");
             }
+            if (preferences.getInt(PREF_PERMISSION_WIZARD_STAGE, 0) == 3) {
+                continuePermissionWizard();
+            }
+        } else if (requestCode == REQUEST_NOTIFICATIONS
+                && preferences.getInt(PREF_PERMISSION_WIZARD_STAGE, 0) == 2) {
+            continuePermissionWizard();
         }
     }
 
@@ -557,11 +665,8 @@ public class MainActivity extends Activity {
                     script.getAbsolutePath(), action, request.getAbsolutePath()
             });
             intent.putExtra(EXTRA_WORKDIR, publicRoot.getAbsolutePath());
-            intent.putExtra(EXTRA_RUNNER, "terminal-session");
-            intent.putExtra(EXTRA_SESSION_ACTION, "0");
-            intent.putExtra(EXTRA_SHELL_NAME,
-                    label == null || label.trim().isEmpty() ? action : label.trim());
-            intent.putExtra(EXTRA_SHELL_CREATE_MODE, "always");
+            intent.putExtra(EXTRA_RUNNER, "app-shell");
+            intent.putExtra(EXTRA_BACKGROUND, true);
             intent.putExtra(EXTRA_COMMAND_LABEL,
                     label == null || label.trim().isEmpty() ? action : label.trim());
             startService(intent);
@@ -610,6 +715,47 @@ public class MainActivity extends Activity {
             return value == null ? fallback : value;
         } catch (IOException exc) {
             return fallback;
+        }
+    }
+
+    private String readLog(String name) {
+        if (!"app".equals(name) && !"napcat".equals(name)
+                && !"astrbot".equals(name) && !"minilm".equals(name)) {
+            return "";
+        }
+        if (publicTreeUri == null || !DocumentStore.hasAccess(this, publicTreeUri)) {
+            return "";
+        }
+        try {
+            String value = new DocumentStore(this, publicTreeUri).readText("logs/" + name + ".log");
+            if (value == null || value.isEmpty()) {
+                return "";
+            }
+            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+            int maxBytes = 160 * 1024;
+            if (bytes.length <= maxBytes) {
+                return value;
+            }
+            return new String(bytes, bytes.length - maxBytes, maxBytes, StandardCharsets.UTF_8);
+        } catch (IOException exc) {
+            return "";
+        }
+    }
+
+    private boolean clearLogInternal(String name) {
+        if (!"app".equals(name) && !"napcat".equals(name)
+                && !"astrbot".equals(name) && !"minilm".equals(name)) {
+            return false;
+        }
+        try {
+            if (!ensurePublicStorage()) {
+                return false;
+            }
+            publicStore().writeBytes(
+                    "logs/" + name + ".log", new byte[0]);
+            return true;
+        } catch (IOException exc) {
+            return false;
         }
     }
 
@@ -1237,6 +1383,16 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void startPermissionWizard() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    MainActivity.this.startPermissionWizard();
+                }
+            });
+        }
+
+        @JavascriptInterface
         public void chooseBackupFolder() {
             runOnUiThread(new Runnable() {
                 @Override
@@ -1269,6 +1425,24 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String loadTaskStatus(String requestPath) {
             return loadTaskStatusInternal(requestPath);
+        }
+
+        @JavascriptInterface
+        public String loadLogs() {
+            JSONObject result = new JSONObject();
+            try {
+                result.put("app", readLog("app"));
+                result.put("napcat", readLog("napcat"));
+                result.put("astrbot", readLog("astrbot"));
+                result.put("minilm", readLog("minilm"));
+            } catch (JSONException ignored) {
+            }
+            return result.toString();
+        }
+
+        @JavascriptInterface
+        public boolean clearLog(String name) {
+            return clearLogInternal(name);
         }
 
         @JavascriptInterface

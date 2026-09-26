@@ -1,6 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
 set -uo pipefail
+export TZ="${TZ:-Asia/Shanghai}"
 
 PUBLIC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOME_ROOT="${ZBS_HOME_ROOT:-$HOME/手机端值班室}"
@@ -227,6 +228,22 @@ pid_running() {
   pid="$(cat "$pid_file" 2>/dev/null || true)"
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
   kill -0 "$pid" 2>/dev/null
+}
+
+ensure_watchdog() {
+  local pid_file="$HOME_ROOT/config/watchdog.pid"
+  local watchdog="$HOME_ROOT/bin/watchdog.sh"
+  [ -x "$watchdog" ] || return 0
+  if command -v termux-wake-lock >/dev/null 2>&1; then
+    termux-wake-lock >/dev/null 2>&1 || true
+  fi
+  if pid_running "$pid_file"; then
+    return 0
+  fi
+  rm -f "$pid_file" 2>/dev/null || true
+  nohup "$watchdog" >> "$LOG_DIR/app.log" 2>&1 &
+  echo $! > "$pid_file"
+  log "后台服务守护已启动"
 }
 
 stop_pid_file() {

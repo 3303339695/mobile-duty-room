@@ -87,17 +87,28 @@ start_instance() {
   else
     warn "实例配置尚未记录密码，本次保持 AstrBot 当前账密不变"
   fi
+  mkdir -p "$dir/logs"
+  ensure_watchdog
+  touch "$dir/desired"
   echo $$ > "$pid_file"
   exec proot-distro login "$UBUNTU_ALIAS" \
     --bind "$HOME_ROOT:/opt/zhibanshi" \
+    --bind "$PUBLIC_ROOT:/opt/zhibanshi-public" \
     -- /bin/bash -lc "
+      export TZ=Asia/Shanghai
       cd '/opt/zhibanshi/instances/$id'
       export ASTRBOT_ROOT='/opt/zhibanshi/instances/$id'
       /root/astrbot-venv/bin/python \
         /opt/zhibanshi/bin/patch_astrbot_config.py \
         /opt/zhibanshi/instances/$id/data/cmd_config.json $credentials
+      /root/astrbot-venv/bin/python \
+        /opt/zhibanshi/bin/patch_astrbot_runtime.py \
+        /root/astrbot-venv
       export ASTRBOT_CLI=1
-      exec /root/astrbot-venv/bin/astrbot run --port '$port'
+      exec /root/astrbot-venv/bin/astrbot run --port '$port' \
+        2>&1 | tee -a \
+        '/opt/zhibanshi-public/logs/astrbot-$id.log' \
+        '/opt/zhibanshi-public/logs/astrbot.log' >/dev/null
     "
 }
 
@@ -110,6 +121,7 @@ stop_instance() {
   validate_instance_id "$id"
   dir="$(instance_dir "$id")"
   pid_file="$dir/run.pid"
+  rm -f "$dir/desired" 2>/dev/null || true
   log "停止 AstrBot 实例：$name"
   stop_pid_file "$pid_file" "/opt/zhibanshi/instances/$id"
   if is_port_open "$port"; then
@@ -126,6 +138,7 @@ stop_all_astrbot() {
     dir="$(dirname "$pid_file")"
     id="$(basename "$dir")"
     log "停止 AstrBot 实例：$id"
+    rm -f "$dir/desired" 2>/dev/null || true
     stop_pid_file "$pid_file" "/opt/zhibanshi/instances/$id"
   done
 }

@@ -3,6 +3,7 @@
 set -uo pipefail
 
 cd /opt/zhibanshi/runtime/napcat/opt/QQ
+export TZ=Asia/Shanghai
 mkdir -p /run/dbus /tmp/.X11-unix
 
 if [ ! -S /run/dbus/system_bus_socket ]; then

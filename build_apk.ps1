@@ -19,7 +19,8 @@ $ZipAlign = Join-Path $BuildTools "zipalign.exe"
 $ApkSigner = Join-Path $BuildTools "apksigner.bat"
 $Javac = Join-Path $Jdk "bin\javac.exe"
 $KeyTool = Join-Path $Jdk "bin\keytool.exe"
-$OutputName = (-join ([char[]](0x624B, 0x673A, 0x7AEF, 0x503C, 0x73ED, 0x5BA4))) + ".apk"
+$AppVersion = (Get-Content -LiteralPath (Join-Path $Root "assets\VERSION") -Raw).Trim()
+$OutputName = (-join ([char[]](0x624B, 0x673A, 0x7AEF, 0x503C, 0x73ED, 0x5BA4))) + "-v$AppVersion.apk"
 $Output = Join-Path $Root $OutputName
 $KeystoreDir = Join-Path $Root "signing"
 $Keystore = Join-Path $KeystoreDir "zhibanshi.keystore"
@@ -102,8 +103,8 @@ if ($LASTEXITCODE -ne 0) { throw "aapt2 compile failed" }
     -A (Join-Path $StageRoot "assets") `
     --min-sdk-version 23 `
     --target-sdk-version 34 `
-    --version-code 28 `
-    --version-name 1.3.10 `
+    --version-code 41 `
+    --version-name $AppVersion `
     (Join-Path $Build "resources.zip")
 if ($LASTEXITCODE -ne 0) { throw "aapt2 link failed" }
 
@@ -186,7 +187,13 @@ if ($LASTEXITCODE -ne 0) { throw "APK legacy verification failed" }
 
 $Badging = & $Aapt2 dump badging $SignedApk
 if ($LASTEXITCODE -ne 0) { throw "APK badging verification failed" }
-if (-not ($Badging -match "package: name='com\.zhibanshi\.mobile\.dutyroom' versionCode='28' versionName='1\.3\.10'")) {
+if (-not ($Badging -match "name='com\.zhibanshi\.mobile\.dutyroom'")) {
+    throw "Unexpected APK package metadata"
+}
+if (-not ($Badging -match "versionCode='41'")) {
+    throw "Unexpected APK version code"
+}
+if (-not ($Badging -match ("versionName='" + [regex]::Escape($AppVersion) + "'"))) {
     throw "Unexpected APK package or version metadata"
 }
 if (-not ($Badging -match "targetSdkVersion:'34'")) {
