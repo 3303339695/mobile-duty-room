@@ -58,6 +58,7 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 
 public class MainActivity extends Activity {
     private static final String TERMUX_PACKAGE = "com.termux";
@@ -718,27 +719,37 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String readLog(String name) {
+    private String readLog(String name, String date, String instanceId) {
         if (!"app".equals(name) && !"napcat".equals(name)
                 && !"astrbot".equals(name) && !"minilm".equals(name)) {
             return "";
+        }
+        SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+        formatter.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));
+        String today = formatter.format(new Date());
+        if (date == null || !date.matches("\\d{4}-\\d{2}-\\d{2}") || date.compareTo(today) > 0) {
+            date = today;
         }
         if (publicTreeUri == null || !DocumentStore.hasAccess(this, publicTreeUri)) {
             return "";
         }
         try {
-            String value = new DocumentStore(this, publicTreeUri).readText("logs/" + name + ".log");
+            DocumentStore store = new DocumentStore(this, publicTreeUri);
+            String relativePath = "logs/" + name + "/" + date + ".log";
+            if ("astrbot".equals(name) && instanceId != null && !instanceId.trim().isEmpty()) {
+                if (!instanceId.matches("bot-[a-z0-9]+(-[0-9]+)?")) {
+                    return "实例日志参数无效";
+                }
+                relativePath = "logs/astrbot/" + instanceId + "/" + date + ".log";
+            }
+            String value = store.readText(relativePath);
             if (value == null || value.isEmpty()) {
-                return "";
+                return "当天暂无日志（日志目录或文件可能已被删除，服务产生新输出后会自动重建）";
             }
-            byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-            int maxBytes = 160 * 1024;
-            if (bytes.length <= maxBytes) {
-                return value;
-            }
-            return new String(bytes, bytes.length - maxBytes, maxBytes, StandardCharsets.UTF_8);
-        } catch (IOException exc) {
-            return "";
+            return value;
+        } catch (Exception exc) {
+            return "日志读取失败：" + exc.getClass().getSimpleName()
+                    + (exc.getMessage() == null ? "" : " - " + exc.getMessage());
         }
     }
 
@@ -751,10 +762,12 @@ public class MainActivity extends Activity {
             if (!ensurePublicStorage()) {
                 return false;
             }
-            publicStore().writeBytes(
-                    "logs/" + name + ".log", new byte[0]);
+            SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            formatter.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));
+            String date = formatter.format(new Date());
+            publicStore().writeBytes("logs/" + name + "/" + date + ".log", new byte[0]);
             return true;
-        } catch (IOException exc) {
+        } catch (Exception exc) {
             return false;
         }
     }
@@ -1183,8 +1196,25 @@ public class MainActivity extends Activity {
             }
         }
 
+        void appendBytes(String relativePath, byte[] bytes) throws IOException {
+            Child child = findExistingChild(rootId, normalize(relativePath));
+            if (child == null) {
+                writeBytes(relativePath, new byte[0]);
+                child = findExistingChild(rootId, normalize(relativePath));
+            }
+            if (child == null || child.directory) {
+                throw new IOException("无法追加日志：" + relativePath);
+            }
+            try (OutputStream output = resolver.openOutputStream(documentUri(child.id), "wa")) {
+                if (output == null) {
+                    throw new IOException("无法打开日志：" + relativePath);
+                }
+                output.write(bytes);
+            }
+        }
+
         String readText(String relativePath) throws IOException {
-            Child child = findChild(rootId, normalize(relativePath));
+            Child child = findExistingChild(rootId, normalize(relativePath));
             if (child == null || child.directory) {
                 return null;
             }
@@ -1248,6 +1278,50 @@ public class MainActivity extends Activity {
             if (normalized.contains("/")) {
                 String parent = normalized.substring(0, normalized.lastIndexOf('/'));
                 return findChild(ensureDirectory(parent), normalized.substring(normalized.lastIndexOf('/') + 1));
+            }
+            Uri childrenUri =
+                    DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId);
+            String[] projection = new String[]{
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE
+            };
+            try (Cursor cursor = resolver.query(childrenUri, projection, null, null, null)) {
+                if (cursor == null) {
+                    return null;
+                }
+                int idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+                int nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+                int typeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE);
+                while (cursor.moveToNext()) {
+                    String candidate = nameColumn < 0 ? null : cursor.getString(nameColumn);
+                    if (!normalized.equals(candidate)) {
+                        continue;
+                    }
+                    String id = idColumn < 0 ? null : cursor.getString(idColumn);
+                    String mime = typeColumn < 0 ? null : cursor.getString(typeColumn);
+                    if (id != null) {
+                        return new Child(
+                                id,
+                                candidate,
+                                DocumentsContract.Document.MIME_TYPE_DIR.equals(mime));
+                    }
+                }
+            }
+            return null;
+        }
+
+        private Child findExistingChild(String parentId, String name) throws IOException {
+            String normalized = normalize(name);
+            if (normalized.contains("/")) {
+                String parent = normalized.substring(0, normalized.lastIndexOf('/'));
+                Child parentChild = findExistingChild(parentId, parent);
+                if (parentChild == null || !parentChild.directory) {
+                    return null;
+                }
+                return findExistingChild(
+                        parentChild.id,
+                        normalized.substring(normalized.lastIndexOf('/') + 1));
             }
             Uri childrenUri =
                     DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId);
@@ -1428,20 +1502,46 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
-        public String loadLogs() {
-            JSONObject result = new JSONObject();
-            try {
-                result.put("app", readLog("app"));
-                result.put("napcat", readLog("napcat"));
-                result.put("astrbot", readLog("astrbot"));
-                result.put("minilm", readLog("minilm"));
-            } catch (JSONException ignored) {
-            }
-            return result.toString();
+        public String loadLog(String name, String date, String instanceId) {
+            return readLog(name, date, instanceId);
         }
 
         @JavascriptInterface
-        public boolean clearLog(String name) {
+        public boolean appendAppLog(String line) {
+            if (line == null || publicTreeUri == null) {
+                return false;
+            }
+            try {
+                SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+                formatter.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));
+                publicStore().appendBytes("logs/app/" + formatter.format(new Date()) + ".log",
+                        (line + "\n").getBytes(StandardCharsets.UTF_8));
+                return true;
+            } catch (Exception exc) {
+                return false;
+            }
+        }
+
+        @JavascriptInterface
+        public boolean clearLog(String name, String instanceId) {
+            if ("astrbot".equals(name) && instanceId != null && !instanceId.trim().isEmpty()) {
+                if (!instanceId.matches("bot-[a-z0-9]+(-[0-9]+)?")) {
+                    return false;
+                }
+                try {
+                    if (!ensurePublicStorage()) {
+                        return false;
+                    }
+                    SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+                    formatter.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));
+                    publicStore().writeBytes(
+                            "logs/astrbot/" + instanceId + "/" + formatter.format(new Date()) + ".log",
+                            new byte[0]);
+                    return true;
+                } catch (Exception exc) {
+                    return false;
+                }
+            }
             return clearLogInternal(name);
         }
 

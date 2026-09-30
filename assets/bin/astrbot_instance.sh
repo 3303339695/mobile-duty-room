@@ -105,11 +105,8 @@ start_instance() {
         /opt/zhibanshi/bin/patch_astrbot_runtime.py \
         /root/astrbot-venv
       export ASTRBOT_CLI=1
-      exec /root/astrbot-venv/bin/astrbot run --port '$port' \
-        2>&1 | tee -a \
-        '/opt/zhibanshi-public/logs/astrbot-$id.log' \
-        '/opt/zhibanshi-public/logs/astrbot.log' >/dev/null
-    "
+      exec /root/astrbot-venv/bin/astrbot run --port '$port'
+    " > >(bash "$PUBLIC_ROOT/bin/log_daily.sh" "$PUBLIC_ROOT" astrbot quiet "$id") 2>&1
 }
 
 stop_instance() {

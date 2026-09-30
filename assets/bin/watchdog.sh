@@ -9,8 +9,8 @@ PID_FILE="$HOME_ROOT/config/watchdog.pid"
 INTERVAL=20
 NAPCAT_LOCK="$HOME_ROOT/config/watchdog-start-napcat.lock"
 MINILM_LOCK="$HOME_ROOT/config/watchdog-start-minilm.lock"
-NAPCAT_LOG="$PUBLIC_ROOT/logs/napcat.log"
 NAPCAT_OFFSET="$HOME_ROOT/config/watchdog-napcat.log.offset"
+NAPCAT_PATH="$HOME_ROOT/config/watchdog-napcat.log.path"
 
 cleanup() {
   rm -f "$PID_FILE" 2>/dev/null || true
@@ -35,9 +35,15 @@ refresh_termux_wake_lock() {
 }
 
 napcat_was_kicked() {
-  [ -f "$NAPCAT_LOG" ] || return 1
-  local size offset chunk
-  size="$(wc -c < "$NAPCAT_LOG" 2>/dev/null || printf '0')"
+  local size offset napcat_log previous
+  napcat_log="$LOG_DIR/napcat/$(date +%F).log"
+  previous="$(cat "$NAPCAT_PATH" 2>/dev/null || true)"
+  if [ "$previous" != "$napcat_log" ]; then
+    printf '%s\n' "$napcat_log" > "$NAPCAT_PATH"
+    printf '0\n' > "$NAPCAT_OFFSET"
+  fi
+  [ -f "$napcat_log" ] || return 1
+  size="$(wc -c < "$napcat_log" 2>/dev/null || printf '0')"
   offset="$(cat "$NAPCAT_OFFSET" 2>/dev/null || printf '0')"
   [[ "$size" =~ ^[0-9]+$ ]] || return 1
   [[ "$offset" =~ ^[0-9]+$ ]] || offset=0
@@ -48,8 +54,7 @@ napcat_was_kicked() {
     return 1
   fi
   printf '%s\n' "$size" > "$NAPCAT_OFFSET"
-  chunk="$(tail -c "+$((offset + 1))" "$NAPCAT_LOG" 2>/dev/null || true)"
-  printf '%s' "$chunk" | grep -Eiq \
+  tail -c "+$((offset + 1))" "$napcat_log" 2>/dev/null | grep -Eiq \
     '被踢下线|KickedOffLine|kick(ed)?[[:space:]_-]*off[[:space:]_-]*line|登录失效|login[^[:cntrl:]]*(invalid|expired|kicked)'
 }
 

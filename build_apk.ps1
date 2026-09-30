@@ -4,7 +4,7 @@ $Root = [System.IO.Path]::GetFullPath((Split-Path -Parent $MyInvocation.MyComman
 $Build = Join-Path $Root ".build"
 $Stage = Join-Path ([System.IO.Path]::GetTempPath()) "zhibanshi-apk-stage"
 $ToolStage = Join-Path ([System.IO.Path]::GetTempPath()) "zhibanshi-apk-tools"
-$SignStage = Join-Path ([System.IO.Path]::GetTempPath()) "zhibanshi-apk-sign"
+$SignStage = Join-Path $Build "sign"
 $Jdk = Join-Path $Root ".tools\jdk\jdk-17.0.20.1+1"
 $Sdk = Join-Path $Root ".tools\android-sdk"
 $JavaHome = $Jdk
@@ -103,7 +103,7 @@ if ($LASTEXITCODE -ne 0) { throw "aapt2 compile failed" }
     -A (Join-Path $StageRoot "assets") `
     --min-sdk-version 23 `
     --target-sdk-version 34 `
-    --version-code 41 `
+    --version-code 48 `
     --version-name $AppVersion `
     (Join-Path $Build "resources.zip")
 if ($LASTEXITCODE -ne 0) { throw "aapt2 link failed" }
@@ -152,8 +152,8 @@ if (-not (Test-Path $Keystore)) {
 }
 
 $SignStageRoot = [System.IO.Path]::GetFullPath($SignStage)
-if (-not $SignStageRoot.StartsWith($TempRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Refusing to clean sign stage outside temp: $SignStageRoot"
+if (-not $SignStageRoot.StartsWith($Build + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to clean sign stage outside build: $SignStageRoot"
 }
 if (Test-Path $SignStageRoot) {
     Remove-Item -LiteralPath $SignStageRoot -Recurse -Force
@@ -190,7 +190,7 @@ if ($LASTEXITCODE -ne 0) { throw "APK badging verification failed" }
 if (-not ($Badging -match "name='com\.zhibanshi\.mobile\.dutyroom'")) {
     throw "Unexpected APK package metadata"
 }
-if (-not ($Badging -match "versionCode='41'")) {
+if (-not ($Badging -match "versionCode='48'")) {
     throw "Unexpected APK version code"
 }
 if (-not ($Badging -match ("versionName='" + [regex]::Escape($AppVersion) + "'"))) {

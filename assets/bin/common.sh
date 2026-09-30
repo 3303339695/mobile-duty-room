@@ -29,6 +29,12 @@ mkdir -p "$HOME_ROOT" "$LOG_DIR" "$CONFIG_DIR" "$DOWNLOAD_DIR" "$BACKUP_DIR" \
   "$HOME_ROOT/runtime" "$HOME_ROOT/logs" "$HOME_ROOT/config" \
   "$CONFIG_DIR/status" 2>/dev/null || true
 
+log_file() {
+  local component="$1"
+  mkdir -p "$LOG_DIR/$component" 2>/dev/null || true
+  printf '%s/%s.log' "$LOG_DIR/$component" "$(date +%F)"
+}
+
 link_runtime() {
   local target="$1"
   local name="$2"
@@ -241,7 +247,7 @@ ensure_watchdog() {
     return 0
   fi
   rm -f "$pid_file" 2>/dev/null || true
-  nohup "$watchdog" >> "$LOG_DIR/app.log" 2>&1 &
+  nohup "$watchdog" > >(bash "$PUBLIC_ROOT/bin/log_daily.sh" "$PUBLIC_ROOT" app quiet) 2>&1 &
   echo $! > "$pid_file"
   log "后台服务守护已启动"
 }

@@ -325,7 +325,7 @@
 
     <section class="panel" id="panel-activity">
       <div class="section">
-        <div class="section-head"><h2>后台日志</h2><div style="display:flex;gap:7px"><button class="button small ghost" id="refresh-logs">刷新</button><button class="button small ghost" id="clear-log">清空</button></div></div>
+        <div class="section-head"><h2>后台日志</h2><div style="display:flex;gap:7px;align-items:center"><select id="log-instance" class="button small ghost" hidden></select><input id="log-date" type="date" class="button small ghost"><button class="button small ghost" id="refresh-logs">刷新</button><button class="button small ghost" id="clear-log">清空当天</button></div></div>
         <div class="surface">
           <div class="log-tabs" id="log-tabs">
             <button class="log-tab active" data-log="app">应用全局</button>
@@ -356,6 +356,16 @@
     let toastTimer;
     let activeLog = "app";
     let logCache = {};
+    function localDate() {
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Shanghai",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit"
+      }).format(new Date());
+    }
+    let activeLogDate = localDate();
+    let activeLogInstance = "";
 
     function parse(value, fallback = {}) {
       try { return JSON.parse(value); } catch (_) { return fallback; }
@@ -380,6 +390,7 @@
       const log = $("#log-view");
       const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
       const line = `[${time}] ${message}`;
+      invoke("appendAppLog", line);
       logCache.app = `${line}\n${logCache.app || ""}`.trim();
       if (activeLog === "app") renderActiveLog();
     }
@@ -390,9 +401,27 @@
       view.scrollTop = view.scrollHeight;
     }
     function refreshLogs() {
-      const data = parse(invoke("loadLogs"), {});
-      logCache = { ...logCache, ...data };
+      const today = localDate();
+      $("#log-date").max = today;
+      $("#clear-log").disabled = activeLogDate !== today;
+      const value = String(invoke("loadLog", activeLog, activeLogDate, activeLogInstance) || "");
+      logCache[activeLog] = value;
       renderActiveLog();
+    }
+    function refreshLogInstanceOptions() {
+      const select = $("#log-instance");
+      if (!select) return;
+      const visible = activeLog === "astrbot";
+      select.hidden = !visible;
+      if (!visible) {
+        activeLogInstance = "";
+        return;
+      }
+      const ids = state.instances.map(instance => String(instance.id || "")).filter(Boolean);
+      if (activeLogInstance && !ids.includes(activeLogInstance)) activeLogInstance = "";
+      select.innerHTML = `<option value="">全部 AstrBot</option>`
+        + ids.map(id => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`).join("");
+      select.value = activeLogInstance;
     }
     function openMiniLmConfig() {
       const dialog = document.createElement("div");
@@ -656,6 +685,7 @@
       state.instances = Array.isArray(data.instances)
         ? data.instances.map(normalizeInstance)
         : [];
+      refreshLogInstanceOptions();
       state.instancesDetecting = Boolean(detect);
       if (detect) {
         state.instances.forEach(instance => {
@@ -1243,16 +1273,31 @@
     $("#minilm-config").onclick = openMiniLmConfig;
     $("#refresh-logs").onclick = refreshLogs;
     $("#clear-log").onclick = () => {
-      invoke("clearLog", activeLog);
+      if (activeLogDate !== localDate()) return;
+      if (!invoke("clearLog", activeLog, activeLogInstance)) {
+        showToast("清空失败");
+        return;
+      }
       logCache[activeLog] = "";
       renderActiveLog();
-      showToast("日志已清空");
+      showToast("当天日志已清空");
+    };
+    $("#log-date").value = activeLogDate;
+    $("#log-date").max = activeLogDate;
+    $("#log-date").onchange = event => {
+      activeLogDate = event.target.value || localDate();
+      refreshLogs();
+    };
+    $("#log-instance").onchange = event => {
+      activeLogInstance = event.target.value || "";
+      refreshLogs();
     };
     $("#log-tabs").onclick = event => {
       const button = event.target.closest("[data-log]");
       if (!button) return;
       activeLog = button.dataset.log;
       $$(".log-tab").forEach(tab => tab.classList.toggle("active", tab === button));
+      refreshLogInstanceOptions();
       refreshLogs();
     };
     $("#refresh-instances").onclick = () => loadInstances({ detect: true });
@@ -1330,9 +1375,6 @@
       record("管理界面已启动");
       refreshLogs();
       setInterval(refreshPorts, 5000);
-      setInterval(() => {
-        if ($("#panel-activity").classList.contains("active")) refreshLogs();
-      }, 3000);
     }
     boot();
   </script>
