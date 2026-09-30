@@ -145,7 +145,7 @@ start_minilm() {
       exec /root/minilm-venv/bin/python /opt/zhibanshi/bin/minilm_server.py \
         --model '/opt/zhibanshi/models/$MINILM_MODEL' \
         --host 127.0.0.1 --port 8000 --api-key local-minilm
-    " > >(bash "$PUBLIC_ROOT/bin/log_daily.sh" "$PUBLIC_ROOT" minilm quiet) 2>&1
+    " >> "$(log_file minilm)" 2>&1
 }
 
 stop_minilm() {

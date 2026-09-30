@@ -20,7 +20,10 @@ fi
 export TASK_STATUS_FILE
 task_status_running "任务已开始"
 
-exec > >(bash "$SCRIPT_DIR/log_daily.sh" "$PUBLIC_ROOT" app stdout) 2>&1
+# 任务日志直接追加到当天文件，不经任何中间进程。
+# 之前用 `exec > >(bash log_daily.sh ...)` 会把整个任务脚本的 stdout 接到一根管道上，
+# 管道填满或消费者退出会连带拖死脚本，原因详见 common.sh 中 ensure_watchdog 的注释。
+exec >> "$(log_file app)" 2>&1
 log "任务：$ACTION"
 log "组件目录：$HOME_ROOT"
 

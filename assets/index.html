@@ -68,9 +68,20 @@
     .panel { display: none; padding-top: 14px; }
     .panel.active { display: block; }
     .section { margin: 0 0 14px; }
-    .section-head { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 8px; gap: 10px; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 8px; gap: 10px; flex-wrap: wrap; }
     .section-head h2 { margin: 0; font-size: 15px; letter-spacing: 0; }
     .section-head .hint { color: var(--muted); font-size: 12px; text-align: right; }
+    /* 标题右侧的工具条：允许换行、允许收缩，避免把标题挤出屏幕并顶出横向滚动条 */
+    .section-head > div { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+    .section-head .button { flex: 0 0 auto; white-space: nowrap; }
+    /* 日志面板的工具条：日期 + 刷新 + 清空当天，窄屏要能整体换到第二行 */
+    .log-tools { row-gap: 8px; }
+    .log-tools input[type="date"] {
+      flex: 0 0 auto; width: 122px; min-width: 0; max-width: 100%;
+      padding: 0 6px; text-align: center;
+      font-size: 12px;
+      -webkit-appearance: none; appearance: none;
+    }
     .surface {
       background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
       overflow: hidden;
@@ -149,6 +160,7 @@
     .log-tab { min-height: 34px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 700; }
     .log-tab.active { background: var(--surface-2); border-color: var(--line); color: var(--text); }
     .log-view { min-height: 300px; max-height: 62vh; overflow: auto; padding: 12px; background: #0b0610; color: #d9cee1; font: 12px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+    .log-hint { margin: 8px 8px 0; padding: 9px 11px; border-radius: 6px; font-size: 12px; line-height: 1.5; background: #2a2312; border: 1px solid #6d5a1f; color: #ffe9a8; }
     .footer { color: #667586; text-align: center; font-size: 11px; margin-top: 18px; }
 
     .toast {
@@ -158,6 +170,12 @@
       transition: transform .18s ease; pointer-events: none;
     }
     .toast.show { transform: translateY(0); }
+    /* 窄屏（手机竖屏）：标题独占一行，工具条整体落到第二行，避免任何横向溢出 */
+    @media (max-width: 560px) {
+      .panel .section-head { gap: 8px; }
+      .log-tools { width: 100%; justify-content: flex-end; }
+      .log-tools input[type="date"] { width: 116px; flex: 0 0 116px; }
+    }
     @media (min-width: 700px) {
       body { max-width: 820px; margin: 0 auto; }
       .component-grid { grid-template-columns: repeat(3, 1fr); }
@@ -325,7 +343,7 @@
 
     <section class="panel" id="panel-activity">
       <div class="section">
-        <div class="section-head"><h2>后台日志</h2><div style="display:flex;gap:7px;align-items:center"><select id="log-instance" class="button small ghost" hidden></select><input id="log-date" type="date" class="button small ghost"><button class="button small ghost" id="refresh-logs">刷新</button><button class="button small ghost" id="clear-log">清空当天</button></div></div>
+        <div class="section-head"><h2>后台日志</h2><div class="log-tools"><input id="log-date" type="date" class="button small ghost"><button class="button small ghost" id="refresh-logs">刷新</button><button class="button small ghost" id="clear-log">清空当天</button></div></div>
         <div class="surface">
           <div class="log-tabs" id="log-tabs">
             <button class="log-tab active" data-log="app">应用全局</button>
@@ -333,6 +351,7 @@
             <button class="log-tab" data-log="astrbot">AstrBot</button>
             <button class="log-tab" data-log="minilm">MiniLM</button>
           </div>
+          <div class="log-hint" id="log-hint" hidden></div>
           <div class="log-view" id="log-view">正在读取日志...</div>
         </div>
       </div>
@@ -365,7 +384,6 @@
       }).format(new Date());
     }
     let activeLogDate = localDate();
-    let activeLogInstance = "";
 
     function parse(value, fallback = {}) {
       try { return JSON.parse(value); } catch (_) { return fallback; }
@@ -397,31 +415,39 @@
     function renderActiveLog() {
       const view = $("#log-view");
       if (!view) return;
-      view.textContent = logCache[activeLog] || "暂无日志";
+      const value = logCache[activeLog] || "暂无日志";
+      // 清空一次，让提示条始终排在日志正文上方
+      view.textContent = "";
+      view.textContent = value;
+      updateLogHint(value);
       view.scrollTop = view.scrollHeight;
+    }
+    function updateLogHint(value) {
+      const hint = $("#log-hint");
+      if (!hint) return;
+      const text = String(value || "");
+      if (text.startsWith("【日志过大")) {
+        const end = text.indexOf("】");
+        hint.textContent = end > 0 ? text.slice(0, end + 1) : "日志过大，仅显示尾部内容";
+        hint.hidden = false;
+        return;
+      }
+      if (activeLog === "astrbot") {
+        hint.textContent = "AstrBot 的日志汇总了所有实例。日志按日期分开存放，超过 7 天的会自动清理。";
+        hint.hidden = false;
+        return;
+      }
+      hint.hidden = true;
+      hint.textContent = "";
     }
     function refreshLogs() {
       const today = localDate();
       $("#log-date").max = today;
       $("#clear-log").disabled = activeLogDate !== today;
-      const value = String(invoke("loadLog", activeLog, activeLogDate, activeLogInstance) || "");
+      // 四个页签各自读各自的文件：astrbot 走实例目录汇总，其余走 logs/<组件>/<日期>.log
+      const value = String(invoke("loadLog", activeLog, activeLogDate, "") || "");
       logCache[activeLog] = value;
       renderActiveLog();
-    }
-    function refreshLogInstanceOptions() {
-      const select = $("#log-instance");
-      if (!select) return;
-      const visible = activeLog === "astrbot";
-      select.hidden = !visible;
-      if (!visible) {
-        activeLogInstance = "";
-        return;
-      }
-      const ids = state.instances.map(instance => String(instance.id || "")).filter(Boolean);
-      if (activeLogInstance && !ids.includes(activeLogInstance)) activeLogInstance = "";
-      select.innerHTML = `<option value="">全部 AstrBot</option>`
-        + ids.map(id => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`).join("");
-      select.value = activeLogInstance;
     }
     function openMiniLmConfig() {
       const dialog = document.createElement("div");
@@ -685,7 +711,6 @@
       state.instances = Array.isArray(data.instances)
         ? data.instances.map(normalizeInstance)
         : [];
-      refreshLogInstanceOptions();
       state.instancesDetecting = Boolean(detect);
       if (detect) {
         state.instances.forEach(instance => {
@@ -1274,7 +1299,8 @@
     $("#refresh-logs").onclick = refreshLogs;
     $("#clear-log").onclick = () => {
       if (activeLogDate !== localDate()) return;
-      if (!invoke("clearLog", activeLog, activeLogInstance)) {
+      // AstrBot 页签是汇总视图，清空动作交给 Java 侧（没有实例参数时会清掉汇总文件）
+      if (!invoke("clearLog", activeLog, "")) {
         showToast("清空失败");
         return;
       }
@@ -1288,16 +1314,11 @@
       activeLogDate = event.target.value || localDate();
       refreshLogs();
     };
-    $("#log-instance").onchange = event => {
-      activeLogInstance = event.target.value || "";
-      refreshLogs();
-    };
     $("#log-tabs").onclick = event => {
       const button = event.target.closest("[data-log]");
       if (!button) return;
       activeLog = button.dataset.log;
       $$(".log-tab").forEach(tab => tab.classList.toggle("active", tab === button));
-      refreshLogInstanceOptions();
       refreshLogs();
     };
     $("#refresh-instances").onclick = () => loadInstances({ detect: true });

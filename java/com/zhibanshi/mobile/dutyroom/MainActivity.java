@@ -59,6 +59,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.regex.Pattern;
 
 public class MainActivity extends Activity {
     private static final String TERMUX_PACKAGE = "com.termux";
@@ -87,6 +88,12 @@ public class MainActivity extends Activity {
     private static final int REQUEST_BACKUP_STORAGE = 4102;
     private static final int REQUEST_TERMUX_PERMISSION = 4103;
     private static final int REQUEST_NOTIFICATIONS = 4104;
+    /** 日志只读尾部这么多字节：文件再有 70MB 也不会把界面卡死。 */
+    private static final int LOG_TAIL_BYTES = 256 * 1024;
+    /** 「全部 AstrBot」汇总时，每个实例最多贡献这么多字节。 */
+    private static final int LOG_AGGREGATE_PER_INSTANCE_BYTES = 64 * 1024;
+    /** 「全部 AstrBot」汇总时最多合并这么多个实例。 */
+    private static final int LOG_AGGREGATE_MAX_INSTANCES = 6;
 
     private WebView webView;
     private File publicRoot;
@@ -735,6 +742,12 @@ public class MainActivity extends Activity {
         }
         try {
             DocumentStore store = new DocumentStore(this, publicTreeUri);
+            if ("astrbot".equals(name)
+                    && (instanceId == null || instanceId.trim().isEmpty())) {
+                // 「全部 AstrBot」：实例日志分散在 logs/astrbot/<实例ID>/ 下，
+                // 这里把每个实例当天的日志汇总起来显示。
+                return readAggregatedAstrbotLog(store, date);
+            }
             String relativePath = "logs/" + name + "/" + date + ".log";
             if ("astrbot".equals(name) && instanceId != null && !instanceId.trim().isEmpty()) {
                 if (!instanceId.matches("bot-[a-z0-9]+(-[0-9]+)?")) {
@@ -742,15 +755,127 @@ public class MainActivity extends Activity {
                 }
                 relativePath = "logs/astrbot/" + instanceId + "/" + date + ".log";
             }
-            String value = store.readText(relativePath);
+            long size = store.documentSize(relativePath);
+            if (size == 0) {
+                return "当天暂无日志（日志目录或文件可能已被删除，服务产生新输出后会自动重建）";
+            }
+            String value;
+            boolean truncated = false;
+            if (size > LOG_TAIL_BYTES) {
+                // 大文件只取尾巴，避免把整个日志读进内存再塞给 WebView。
+                value = store.readTailText(relativePath, LOG_TAIL_BYTES);
+                truncated = true;
+            } else {
+                value = store.readText(relativePath);
+            }
             if (value == null || value.isEmpty()) {
                 return "当天暂无日志（日志目录或文件可能已被删除，服务产生新输出后会自动重建）";
             }
-            return value;
+            if (truncated) {
+                return sanitizeLogText("【日志过大，仅显示最后 "
+                        + (LOG_TAIL_BYTES / 1024) + " KB，完整内容在部署文件夹的 logs 目录里】\n"
+                        + value);
+            }
+            return sanitizeLogText(value);
         } catch (Exception exc) {
             return "日志读取失败：" + exc.getClass().getSimpleName()
                     + (exc.getMessage() == null ? "" : " - " + exc.getMessage());
         }
+    }
+
+    /**
+     * 清掉终端控制序列，日志才能干净地显示在网页里。
+     * 服务的 stdout/stderr 是直接写文件的，没有终端去解释颜色码，于是：
+     *   1) 完整的转义序列（ESC[32m）会原样留在文件里；
+     *   2) 有些链路上 ESC 本身被丢掉了，只剩 [32m、[0m、[1m 这样的残渣。
+     * 两种情况都要清掉，否则日志栏里就是一堆 [32m 垃圾字符。
+     */
+    private static final Pattern ANSI_PATTERN =
+            Pattern.compile("\u001B\\[[0-9;?]*[ -/]*[@-~]");
+    /** ESC 丢失后残留的颜色码，例如 [32m、[1m、[0m、[38;5;9m。 */
+    private static final Pattern BARE_ANSI_PATTERN =
+            Pattern.compile("\\[[0-9]{1,3}(?:;[0-9]{1,3})*m");
+
+    private static String sanitizeLogText(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return raw;
+        }
+        String text = ANSI_PATTERN.matcher(raw).replaceAll("");
+        // 用正则手动重建，避免 replaceAll 里又要转义 $ 和 \
+        StringBuilder cleaned = new StringBuilder(text.length());
+        java.util.regex.Matcher matcher = BARE_ANSI_PATTERN.matcher(text);
+        int cursor = 0;
+        while (matcher.find()) {
+            cleaned.append(text, cursor, matcher.start());
+            cursor = matcher.end();
+        }
+        cleaned.append(text, cursor, text.length());
+
+        StringBuilder result = new StringBuilder(cleaned.length());
+        for (int index = 0; index < cleaned.length(); index++) {
+            char ch = cleaned.charAt(index);
+            if (ch == '\n' || ch == '\t' || ch == '\r') {
+                result.append(ch);
+                continue;
+            }
+            if (ch < 0x20 || ch == 0x7F || (ch >= 0x80 && ch <= 0x9F)) {
+                // 其余控制字符（含 C1 段）直接丢掉，中文和 emoji 都在 0xA0 以上，不受影响
+                continue;
+            }
+            result.append(ch);
+        }
+        return result.toString();
+    }
+
+    /**
+     * 汇总所有 AstrBot 实例当天的日志。
+     * 每个实例最多贡献 LOG_AGGREGATE_PER_INSTANCE_BYTES，实例数最多 LOG_AGGREGATE_MAX_INSTANCES 个，
+     * 免得实例一多又把 WebView 撑爆。
+     */
+    private String readAggregatedAstrbotLog(DocumentStore store, String date)
+            throws IOException {
+        StringBuilder result = new StringBuilder();
+        int instances = 0;
+        boolean truncated = false;
+        for (DocumentStore.Entry entry : store.listChildren("logs/astrbot")) {
+            if (!entry.directory) {
+                continue;
+            }
+            if (instances >= LOG_AGGREGATE_MAX_INSTANCES) {
+                truncated = true;
+                break;
+            }
+            String relativePath = "logs/astrbot/" + entry.name + "/" + date + ".log";
+            long size = store.documentSize(relativePath);
+            if (size <= 0) {
+                continue;
+            }
+            String value;
+            if (size > LOG_AGGREGATE_PER_INSTANCE_BYTES) {
+                value = store.readTailText(relativePath, LOG_AGGREGATE_PER_INSTANCE_BYTES);
+                truncated = true;
+            } else {
+                value = store.readText(relativePath);
+            }
+            if (value == null || value.isEmpty()) {
+                continue;
+            }
+            instances++;
+            result.append("========== ").append(entry.name).append(" ==========\n");
+            result.append(value);
+            if (!value.endsWith("\n")) {
+                result.append('\n');
+            }
+            result.append('\n');
+        }
+        if (instances == 0) {
+            return "当天暂无 AstrBot 实例日志（实例还没启动过，或日志目录已被删除）";
+        }
+        if (truncated) {
+            result.insert(0, "【日志过多，仅显示部分实例或最后 "
+                    + (LOG_AGGREGATE_PER_INSTANCE_BYTES / 1024) + " KB】\n");
+        }
+        return sanitizeLogText(result.toString());
     }
 
     private boolean clearLogInternal(String name) {
@@ -1054,12 +1179,19 @@ public class MainActivity extends Activity {
             final String absolutePath;
             final long size;
             final long modified;
+            final boolean directory;
 
             Entry(String name, String absolutePath, long size, long modified) {
+                this(name, absolutePath, size, modified, false);
+            }
+
+            Entry(String name, String absolutePath, long size, long modified,
+                    boolean directory) {
                 this.name = name;
                 this.absolutePath = absolutePath;
                 this.size = size;
                 this.modified = modified;
+                this.directory = directory;
             }
         }
 
@@ -1273,6 +1405,63 @@ public class MainActivity extends Activity {
             return result;
         }
 
+        /**
+         * 列出目录下已存在的直接子项（不创建任何东西）。
+         * 用于「全部 AstrBot」汇总：枚举 logs/astrbot 下的实例子目录。
+         */
+        List<Entry> listChildren(String relativePath) {
+            List<Entry> result = new ArrayList<>();
+            try {
+                Child parent = findExistingChild(rootId, normalize(relativePath));
+                if (parent == null || !parent.directory) {
+                    return result;
+                }
+                Uri childrenUri =
+                        DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parent.id);
+                String[] projection = new String[]{
+                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                        DocumentsContract.Document.COLUMN_MIME_TYPE,
+                        DocumentsContract.Document.COLUMN_SIZE,
+                        DocumentsContract.Document.COLUMN_LAST_MODIFIED
+                };
+                try (Cursor cursor = resolver.query(childrenUri, projection, null, null, null)) {
+                    if (cursor == null) {
+                        return result;
+                    }
+                    int idColumn =
+                            cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+                    int nameColumn =
+                            cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+                    int typeColumn =
+                            cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE);
+                    int sizeColumn =
+                            cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE);
+                    int modifiedColumn =
+                            cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED);
+                    while (cursor.moveToNext()) {
+                        String name = nameColumn < 0 ? null : cursor.getString(nameColumn);
+                        if (name == null) {
+                            continue;
+                        }
+                        String mime = typeColumn < 0 ? null : cursor.getString(typeColumn);
+                        long size = sizeColumn < 0 || cursor.isNull(sizeColumn)
+                                ? 0 : cursor.getLong(sizeColumn);
+                        long modified = modifiedColumn < 0 || cursor.isNull(modifiedColumn)
+                                ? 0 : cursor.getLong(modifiedColumn);
+                        result.add(new Entry(
+                                name,
+                                new File(rootPath, name).getAbsolutePath(),
+                                size,
+                                modified,
+                                DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)));
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            return result;
+        }
+
         private Child findChild(String parentId, String name) throws IOException {
             String normalized = normalize(name);
             if (normalized.contains("/")) {
@@ -1355,8 +1544,93 @@ public class MainActivity extends Activity {
             return null;
         }
 
+        long documentSize(String relativePath) throws IOException {
+            Child child = findExistingChild(rootId, normalize(relativePath));
+            if (child == null || child.directory) {
+                return -1L;
+            }
+            Uri documentUri = documentUri(child.id);
+            try (Cursor cursor = resolver.query(
+                    documentUri,
+                    new String[]{DocumentsContract.Document.COLUMN_SIZE},
+                    null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int sizeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE);
+                    if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) {
+                        return cursor.getLong(sizeColumn);
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            try (InputStream input = resolver.openInputStream(documentUri)) {
+                if (input == null) {
+                    return -1L;
+                }
+                byte[] buffer = new byte[8192];
+                long total = 0L;
+                int read;
+                while ((read = input.read(buffer)) != -1) {
+                    total += read;
+                }
+                return total;
+            }
+        }
+
+        /**
+         * 只读文件尾部 maxBytes 字节。
+         * 日志可以长到几十 MB，全量读取会把 WebView 卡死，所以这里永远只取尾巴。
+         */
+        String readTailText(String relativePath, int maxBytes) throws IOException {
+            Child child = findExistingChild(rootId, normalize(relativePath));
+            if (child == null || child.directory) {
+                return null;
+            }
+            try (InputStream input = resolver.openInputStream(documentUri(child.id))) {
+                if (input == null) {
+                    return null;
+                }
+                long skipped = 0L;
+                long remaining = Math.max(0L, documentSize(relativePath) - maxBytes);
+                while (remaining > 0) {
+                    long step = input.skip(remaining);
+                    if (step <= 0) {
+                        int single = input.read();
+                        if (single < 0) {
+                            break;
+                        }
+                        remaining--;
+                        skipped++;
+                        continue;
+                    }
+                    remaining -= step;
+                    skipped += step;
+                }
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = input.read(buffer)) != -1) {
+                    output.write(buffer, 0, read);
+                }
+                return trimLeadingUtf8(output.toByteArray(), skipped > 0);
+            }
+        }
+
         private Uri documentUri(String documentId) {
             return DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId);
+        }
+
+        /**
+         * 从任意字节位置切开一个 UTF-8 流时，开头可能只剩续接字节（10xxxxxx），
+         * 直接解码会得到一串乱码方块，所以先剥掉这些残字节。
+         */
+        private static String trimLeadingUtf8(byte[] bytes, boolean trimmed) {
+            int start = 0;
+            if (trimmed) {
+                while (start < bytes.length && (bytes[start] & 0xC0) == 0x80) {
+                    start++;
+                }
+            }
+            return new String(bytes, start, bytes.length - start, StandardCharsets.UTF_8);
         }
 
         private static String normalize(String path) {

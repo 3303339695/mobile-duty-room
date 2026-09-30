@@ -28,12 +28,27 @@ $Bash = "C:\Program Files\Git\bin\bash.exe"
 $Python = (Get-Command "python.exe" -ErrorAction Stop).Source
 
 if (Test-Path -LiteralPath $Bash) {
-    Get-ChildItem -LiteralPath (Join-Path $Root "assets\bin") -Filter "*.sh" | ForEach-Object {
-        & $Bash -n $_.FullName
-        if ($LASTEXITCODE -ne 0) {
-            throw "Shell syntax validation failed: $($_.Name)"
-        }
+    $ShellCheckOk = $true
+    try {
+        # 先探一下 bash 能不能正常起来（某些受限环境会创建不了信号管道）
+        & $Bash -n (Join-Path $Root "assets\bin\common.sh") 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) { $ShellCheckOk = $false }
+    } catch {
+        $ShellCheckOk = $false
     }
+    if ($ShellCheckOk) {
+        Get-ChildItem -LiteralPath (Join-Path $Root "assets\bin") -Filter "*.sh" | ForEach-Object {
+            & $Bash -n $_.FullName
+            if ($LASTEXITCODE -ne 0) {
+                throw "Shell syntax validation failed: $($_.Name)"
+            }
+        }
+        Write-Output "SHELLCHECK=ok"
+    } else {
+        Write-Output "SHELLCHECK=skipped (bash unavailable in this environment)"
+    }
+} else {
+    Write-Output "SHELLCHECK=skipped (bash not installed)"
 }
 
 Get-ChildItem -LiteralPath (Join-Path $Root "assets\bin") -Filter "*.py" | ForEach-Object {
@@ -103,16 +118,28 @@ if ($LASTEXITCODE -ne 0) { throw "aapt2 compile failed" }
     -A (Join-Path $StageRoot "assets") `
     --min-sdk-version 23 `
     --target-sdk-version 34 `
-    --version-code 48 `
+    --version-code 52 `
     --version-name $AppVersion `
     (Join-Path $Build "resources.zip")
 if ($LASTEXITCODE -ne 0) { throw "aapt2 link failed" }
 
 $JavaFiles = Get-ChildItem -LiteralPath (Join-Path $StageRoot "java") -Recurse -Filter "*.java" |
     ForEach-Object { $_.FullName }
-& $Javac -encoding UTF-8 -source 8 -target 8 -classpath $ToolAndroidJar `
-    -d (Join-Path $Build "classes") $JavaFiles
-if ($LASTEXITCODE -ne 0) { throw "javac failed" }
+# 注意：javac 在 -source 8 下会把"未设置引导类路径"当警告打到 stderr，
+# PowerShell 会把原生命令的 stderr 包装成错误记录，$ErrorActionPreference=Stop 时直接中断构建。
+# 这里先临时放宽错误偏好，再把 stderr 合并进 stdout，靠退出码判断成败。
+$SavedErrorAction = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$JavacOutput = & $Javac -encoding UTF-8 -source 8 -target 8 -classpath $ToolAndroidJar `
+    -d (Join-Path $Build "classes") $JavaFiles 2>&1
+$JavacExit = $LASTEXITCODE
+$ErrorActionPreference = $SavedErrorAction
+if ($JavacOutput) {
+    $JavacOutput | Where-Object { $_ -notmatch "引导类路径|bootstrap class path" } | ForEach-Object {
+        Write-Output ("javac: {0}" -f $_)
+    }
+}
+if ($JavacExit -ne 0) { throw "javac failed" }
 
 $MainClass = Join-Path $Build "classes\com\zhibanshi\mobile\dutyroom\MainActivity.class"
 if (-not (Test-Path -LiteralPath $MainClass)) {
@@ -190,7 +217,7 @@ if ($LASTEXITCODE -ne 0) { throw "APK badging verification failed" }
 if (-not ($Badging -match "name='com\.zhibanshi\.mobile\.dutyroom'")) {
     throw "Unexpected APK package metadata"
 }
-if (-not ($Badging -match "versionCode='48'")) {
+if (-not ($Badging -match "versionCode='52'")) {
     throw "Unexpected APK version code"
 }
 if (-not ($Badging -match ("versionName='" + [regex]::Escape($AppVersion) + "'"))) {

@@ -31,3 +31,7 @@ __pycache__/
 *.py[cod]
 .DS_Store
 Thumbs.db
+
+# Local verification scratch files (layout probes, browser profiles, check output)
+.tmp-*
+.layout-*

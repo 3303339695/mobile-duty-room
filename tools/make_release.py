@@ -6,7 +6,7 @@ import sys
 import zipfile
 
 
-VERSION = "1.3.30"
+VERSION = "1.3.34"
 LABEL = "耐活王更新"
 APK_BASENAME = f"手机端值班室-v{VERSION}-{LABEL}.apk"
 ZIP_BASENAME = f"手机端值班室-v{VERSION}-{LABEL}.zip"

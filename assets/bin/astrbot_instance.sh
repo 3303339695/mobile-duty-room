@@ -89,8 +89,12 @@ start_instance() {
   fi
   mkdir -p "$dir/logs"
   ensure_watchdog
+  prepare_log_dir "astrbot/$id"
   touch "$dir/desired"
   echo $$ > "$pid_file"
+  # 实例日志直接追加到 logs/astrbot/<实例ID>/<日期>.log。
+  # 前端下拉框里的「全部 AstrBot」由 App 读取时把各实例当天的日志汇总起来，
+  # 所以这里不需要再写一份汇总文件，也就完全不需要管道（管道会堵死服务、SIGPIPE 会杀掉守护进程）。
   exec proot-distro login "$UBUNTU_ALIAS" \
     --bind "$HOME_ROOT:/opt/zhibanshi" \
     --bind "$PUBLIC_ROOT:/opt/zhibanshi-public" \
@@ -106,7 +110,7 @@ start_instance() {
         /root/astrbot-venv
       export ASTRBOT_CLI=1
       exec /root/astrbot-venv/bin/astrbot run --port '$port'
-    " > >(bash "$PUBLIC_ROOT/bin/log_daily.sh" "$PUBLIC_ROOT" astrbot quiet "$id") 2>&1
+    " >> "$(log_file "astrbot/$id")" 2>&1
 }
 
 stop_instance() {

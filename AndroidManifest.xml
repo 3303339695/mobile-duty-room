@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.zhibanshi.mobile.dutyroom"
-    android:versionCode="48"
-    android:versionName="1.3.30">
+    android:versionCode="52"
+    android:versionName="1.3.34">
 
     <uses-sdk
         android:minSdkVersion="23"

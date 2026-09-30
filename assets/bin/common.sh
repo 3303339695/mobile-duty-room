@@ -29,10 +29,20 @@ mkdir -p "$HOME_ROOT" "$LOG_DIR" "$CONFIG_DIR" "$DOWNLOAD_DIR" "$BACKUP_DIR" \
   "$HOME_ROOT/runtime" "$HOME_ROOT/logs" "$HOME_ROOT/config" \
   "$CONFIG_DIR/status" 2>/dev/null || true
 
-log_file() {
+# 单个日志文件超过这个大小就地轮转成 .1 .2，避免再攒出 70MB 的单文件。
+LOG_MAX_BYTES=$((10 * 1024 * 1024))
+# 超过这个天数的日志自动删除，用户不需要再手动清。
+LOG_KEEP_DAYS=7
+
+prepare_log_dir() {
   local component="$1"
   mkdir -p "$LOG_DIR/$component" 2>/dev/null || true
-  printf '%s/%s.log' "$LOG_DIR/$component" "$(date +%F)"
+}
+
+log_file() {
+  local component="$1"
+  prepare_log_dir "$component"
+  printf '%s/%s/%s.log' "$LOG_DIR" "$component" "$(date +%F)"
 }
 
 link_runtime() {
@@ -247,7 +257,12 @@ ensure_watchdog() {
     return 0
   fi
   rm -f "$pid_file" 2>/dev/null || true
-  nohup "$watchdog" > >(bash "$PUBLIC_ROOT/bin/log_daily.sh" "$PUBLIC_ROOT" app quiet) 2>&1 &
+  # 守护进程的 stdout 直接追加到当天文件。
+  # 这里绝不能接 `> >(bash log_daily.sh ...)` 这类管道消费者：
+  # 消费者变慢会填满管道把守护进程堵死，消费者被系统杀掉会让守护进程吃 SIGPIPE 直接退出，
+  # 两种情况都会让保活失效（息屏一会儿服务就全停）。详见 README 的日志说明。
+  prepare_log_dir "app"
+  nohup "$watchdog" >> "$(log_file app)" 2>&1 &
   echo $! > "$pid_file"
   log "后台服务守护已启动"
 }

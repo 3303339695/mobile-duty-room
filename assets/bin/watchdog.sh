@@ -4,6 +4,8 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/common.sh"
+# shellcheck source=log_rotate.sh
+source "$SCRIPT_DIR/log_rotate.sh"
 
 PID_FILE="$HOME_ROOT/config/watchdog.pid"
 INTERVAL=20
@@ -25,6 +27,9 @@ if [ -f "$PID_FILE" ]; then
   fi
 fi
 printf '%s\n' "$$" > "$PID_FILE"
+
+# 启动时先把旧版遗留的 logs/<组件>.log 大单文件轮转掉（只轮转，不删除）。
+log_rotate_legacy
 
 log "服务守护已接管：NapCat / AstrBot / MiniLM"
 
@@ -60,6 +65,9 @@ napcat_was_kicked() {
 
 while :; do
   refresh_termux_wake_lock
+
+  # 日志轮转：超限就地 copytruncate，过期自动删除。纯文件操作，不碰任何服务的输出通路。
+  log_rotate_all
 
   if [ -f "$HOME_ROOT/config/desired-napcat" ] && napcat_was_kicked; then
     rm -f "$HOME_ROOT/config/desired-napcat" "$NAPCAT_LOCK" 2>/dev/null || true

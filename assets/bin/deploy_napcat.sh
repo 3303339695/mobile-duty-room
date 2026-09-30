@@ -177,9 +177,9 @@ start_napcat() {
   echo "============================================================"
   mkdir -p "$HOME_ROOT/logs"
   ensure_watchdog
-  napcat_log="$LOG_DIR/napcat/$(date +%F).log"
-  mkdir -p "$LOG_DIR/napcat"
-  touch "$napcat_log"
+  prepare_log_dir "napcat"
+  napcat_log="$(log_file napcat)"
+  touch "$napcat_log" 2>/dev/null || true
   printf '%s\n' "$napcat_log" > "$HOME_ROOT/config/watchdog-napcat.log.path"
   printf '%s\n' "$(wc -c < "$napcat_log" 2>/dev/null || printf '0')" \
     > "$HOME_ROOT/config/watchdog-napcat.log.offset"
@@ -189,7 +189,7 @@ start_napcat() {
     --bind "$HOME_ROOT:/opt/zhibanshi" \
     --bind "$PUBLIC_ROOT:/opt/zhibanshi-public" \
     -- /bin/bash -lc "export TZ=Asia/Shanghai; exec /opt/zhibanshi/bin/start_napcat_inner.sh" \
-    > >(bash "$PUBLIC_ROOT/bin/log_daily.sh" "$PUBLIC_ROOT" napcat quiet) 2>&1
+    >> "$napcat_log" 2>&1
 }
 
 stop_napcat() {
