@@ -471,18 +471,21 @@ announce_download_size() {
   return 0
 }
 
-# 断点续传下载单个文件。静默进行，不往日志里刷进度条。
+# 断点续传下载单个文件。
+# 保留下载器自带的进度条：用户需要看到"在动"。
+# 界面那边会把"回到行首重写"的指令还原成原地覆盖，所以只显示最新的那一行，不会刷屏。
 fetch_with_resume() {
   local url="$1"
   local output="$2"
   mkdir -p "$(dirname "$output")" 2>/dev/null || true
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL --retry 4 --retry-delay 3 --connect-timeout 20 -C - \
+    curl -fL --retry 4 --retry-delay 3 --connect-timeout 20 -C - -# \
       -o "$output" "$url" >&2 && [ -s "$output" ]
     return $?
   fi
   if command -v wget >/dev/null 2>&1; then
-    wget -q -c --tries=4 --timeout=20 -O "$output" "$url" >&2 && [ -s "$output" ]
+    wget -c --tries=4 --timeout=20 --show-progress -O "$output" "$url" >&2 \
+      && [ -s "$output" ]
     return $?
   fi
   return 1
@@ -803,9 +806,9 @@ download_file() {
       return
     fi
   fi
-  # 先告诉用户要下多大，再静默下载——进度条会把日志刷爆
+  # 先告诉用户要下多大，下载过程保留进度条（界面会原地覆盖显示，不刷屏）
   announce_download_size "$url" " $(basename "$output")"
-  if ! curl -fsSL --retry 3 --connect-timeout 20 "$url" -o "$output"; then
+  if ! curl -fL --retry 3 --connect-timeout 20 -# "$url" -o "$output"; then
     rm -f "$output" 2>/dev/null || true
     warn "curl 下载失败，尝试使用 wget"
     if ! command -v wget >/dev/null 2>&1; then

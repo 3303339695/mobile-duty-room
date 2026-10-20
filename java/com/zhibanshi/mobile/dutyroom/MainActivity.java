@@ -804,18 +804,33 @@ public class MainActivity extends Activity {
         cleaned.append(text, cursor, text.length());
 
         StringBuilder result = new StringBuilder(cleaned.length());
+        StringBuilder currentLine = new StringBuilder(160);
         for (int index = 0; index < cleaned.length(); index++) {
             char ch = cleaned.charAt(index);
-            if (ch == '\n' || ch == '\t' || ch == '\r') {
-                result.append(ch);
+            if (ch == '\r') {
+                // 回车：回到行首重新写。
+                // 下载进度条就是这么原地刷新的；写进文件之后这个指令失效，
+                // 才会变成一行行堆叠。这里把它还原成"擦掉重写"，
+                // 于是界面上只留下最后一次的结果，不会刷屏。
+                currentLine.setLength(0);
+                continue;
+            }
+            if (ch == '\n') {
+                result.append(currentLine).append('\n');
+                currentLine.setLength(0);
+                continue;
+            }
+            if (ch == '\t') {
+                currentLine.append(ch);
                 continue;
             }
             if (ch < 0x20 || ch == 0x7F || (ch >= 0x80 && ch <= 0x9F)) {
                 // 其余控制字符（含 C1 段）直接丢掉，中文和 emoji 都在 0xA0 以上，不受影响
                 continue;
             }
-            result.append(ch);
+            currentLine.append(ch);
         }
+        result.append(currentLine);
         return result.toString();
     }
 
