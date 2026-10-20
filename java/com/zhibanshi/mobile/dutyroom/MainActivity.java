@@ -73,6 +73,9 @@ public class MainActivity extends Activity {
     // 已经同步到设备的脚本包版本。记在内存里，
     // 这样日常点按钮时连文件都不用读，直接放行。
     private String syncedBundleVersion = null;
+    // 复用的存储对象与它对应的授权地址，避免每次都重建、把目录缓存丢光。
+    private DocumentStore cachedStore = null;
+    private Uri cachedStoreUri = null;
     private static final String EDGE_PACKAGE = "com.microsoft.emmx";
     private static final String TERMUX_SERVICE = "com.termux.app.RunCommandService";
     private static final String TERMUX_ACTION = "com.termux.RUN_COMMAND";
@@ -369,7 +372,10 @@ public class MainActivity extends Activity {
 
     private JSONObject storageState() {
         JSONObject state = new JSONObject();
-        boolean folderGranted = DocumentStore.hasAccess(this, publicTreeUri);
+        // 已经确认过就不用再问系统一次；这个状态是界面每次刷新都要取的，
+        // 每次都去问一遍权限，白白拖慢刷新。
+        boolean folderGranted = storageDirsReady
+                || DocumentStore.hasAccess(this, publicTreeUri);
         try {
             state.put("allFiles", folderGranted);
             state.put("legacyWrite", folderGranted);
@@ -571,6 +577,10 @@ public class MainActivity extends Activity {
     }
 
     private boolean ensurePublicStorage() {
+        // 已经确认并创建过一次，直接放行，不再去问系统权限。
+        if (storageDirsReady) {
+            return true;
+        }
         if (publicTreeUri == null || !DocumentStore.hasAccess(this, publicTreeUri)) {
             // 权限没了就把"目录已备好"的标记也清掉，下次重新建
             storageDirsReady = false;
@@ -579,9 +589,6 @@ public class MainActivity extends Activity {
         // 六个目录挨个检查一遍，在手机上就是六次系统调用。
         // 以前每提交一次任务都做一遍，纯属白费；
         // 目录建过一次就一直在，本次运行期间不必反复确认。
-        if (storageDirsReady) {
-            return true;
-        }
         try {
             DocumentStore store = new DocumentStore(this, publicTreeUri);
             String[] dirs = new String[]{
@@ -598,10 +605,25 @@ public class MainActivity extends Activity {
     }
 
     private DocumentStore publicStore() throws IOException {
+        // 缓存命中就直接用，连权限查询都省掉。
+        // 权限真没了的话，后面真正读写时会立刻报错，不会悄悄写错地方。
+        if (cachedStore != null && publicTreeUri != null && publicTreeUri.equals(cachedStoreUri)) {
+            return cachedStore;
+        }
         if (publicTreeUri == null || !DocumentStore.hasAccess(this, publicTreeUri)) {
+            cachedStore = null;
+            cachedStoreUri = null;
             throw new IOException("请先授权部署文件夹");
         }
-        return new DocumentStore(this, publicTreeUri);
+        // 复用同一个对象。以前每次用都新建一个，
+        // 里面记下的"哪个目录对应哪个编号"会全部丢掉，
+        // 于是每次找文件都要把整个目录从头翻一遍——
+        // 目录越用越大，翻得越慢，这就是卡顿越来越重的原因。
+        if (cachedStore == null || !publicTreeUri.equals(cachedStoreUri)) {
+            cachedStore = new DocumentStore(this, publicTreeUri);
+            cachedStoreUri = publicTreeUri;
+        }
+        return cachedStore;
     }
 
     private String syncBundleInternal() {
@@ -1309,6 +1331,14 @@ public class MainActivity extends Activity {
         private final Uri treeUri;
         private final String rootId;
         private final String rootPath;
+        // 目录路径 → 目录编号。
+        // 没有它的时候，每次找文件都要从根目录一层层翻下来，
+        // 而手机上的目录查询是一条条跟系统存储服务要数据，非常慢；
+        // 目录越大、文件越多，翻一遍越久，界面就越是卡。
+        private final java.util.HashMap<String, String> dirIdCache = new java.util.HashMap<>();
+        // 完整路径 → 文件编号。追加日志时用得上：
+        // 日志是一行一行往同一个文件后面接的，编号不会变，记住了就不用反复翻目录。
+        private final java.util.HashMap<String, String> docIdCache = new java.util.HashMap<>();
 
         DocumentStore(Context context, Uri treeUri) throws IOException {
             if (treeUri == null) {
@@ -1377,8 +1407,21 @@ public class MainActivity extends Activity {
             if (normalized.isEmpty()) {
                 return currentId;
             }
+            // 整个路径都记着，直接返回
+            String cached = dirIdCache.get(normalized);
+            if (cached != null) {
+                return cached;
+            }
+            String built = "";
             for (String part : normalized.split("/")) {
                 if (part.isEmpty() || ".".equals(part)) {
+                    continue;
+                }
+                built = built.isEmpty() ? part : built + "/" + part;
+                // 逐层查缓存：前面几层通常早就建好了
+                String known = dirIdCache.get(built);
+                if (known != null) {
+                    currentId = known;
                     continue;
                 }
                 Child child = findChild(currentId, part);
@@ -1398,6 +1441,7 @@ public class MainActivity extends Activity {
                     }
                     currentId = child.id;
                 }
+                dirIdCache.put(built, currentId);
             }
             return currentId;
         }
@@ -1435,13 +1479,32 @@ public class MainActivity extends Activity {
                 output.write(bytes);
                 output.flush();
             }
+            // 刚写过这个文件，把它的编号记下来，之后追加日志就不用再翻目录
+            try {
+                docIdCache.put(normalized, DocumentsContract.getDocumentId(target));
+            } catch (Exception ignored) {
+            }
         }
 
         void appendBytes(String relativePath, byte[] bytes) throws IOException {
-            Child child = findExistingChild(rootId, normalize(relativePath));
+            String normalized = normalize(relativePath);
+            // 日志是一行一行往同一个文件后面接的，文件编号不会变。
+            // 记住它就不用每次都把整个目录翻一遍找这个文件——
+            // 而"记日志"这个动作发生得非常频繁，翻目录的开销会被放大很多倍。
+            String known = docIdCache.get(normalized);
+            Child child = known == null ? null : new Child(known, normalized, false);
+            if (child == null) {
+                child = findExistingChild(rootId, normalized);
+                if (child != null && !child.directory) {
+                    docIdCache.put(normalized, child.id);
+                }
+            }
             if (child == null) {
                 writeBytes(relativePath, new byte[0]);
-                child = findExistingChild(rootId, normalize(relativePath));
+                child = findExistingChild(rootId, normalized);
+                if (child != null && !child.directory) {
+                    docIdCache.put(normalized, child.id);
+                }
             }
             if (child == null || child.directory) {
                 throw new IOException("无法追加日志：" + relativePath);
@@ -1451,6 +1514,10 @@ public class MainActivity extends Activity {
                     throw new IOException("无法打开日志：" + relativePath);
                 }
                 output.write(bytes);
+            } catch (IOException exc) {
+                // 文件可能已经被删掉，缓存作废，下次重新找
+                docIdCache.remove(normalized);
+                throw exc;
             }
         }
 
@@ -1673,10 +1740,29 @@ public class MainActivity extends Activity {
          *   二、为了拿文件大小把整个文件读一遍——改用文件描述符直接问长度。
          */
         LogTail readLogTail(String relativePath, int maxBytes) throws IOException {
-            Child child = findExistingChild(rootId, normalize(relativePath));
+            String normalized = normalize(relativePath);
+            // 同一天的日志会被反复刷新，记住文件编号就不用每刷一次翻一遍目录。
+            String known = docIdCache.get(normalized);
+            Child child = known == null ? null : new Child(known, normalized, false);
+            if (child == null) {
+                child = findExistingChild(rootId, normalized);
+                if (child != null && !child.directory) {
+                    docIdCache.put(normalized, child.id);
+                }
+            }
             if (child == null || child.directory) {
                 return null;
             }
+            try {
+                return readLogTailOf(child, maxBytes);
+            } catch (IOException exc) {
+                // 日志可能刚好被轮转或删掉，缓存作废，让上层重试
+                docIdCache.remove(normalized);
+                throw exc;
+            }
+        }
+
+        private LogTail readLogTailOf(Child child, int maxBytes) throws IOException {
             Uri documentUri = documentUri(child.id);
             long size = documentSize(documentUri);
             if (size == 0) {
