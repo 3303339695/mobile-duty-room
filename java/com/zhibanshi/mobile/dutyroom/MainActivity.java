@@ -64,6 +64,15 @@ import java.util.regex.Pattern;
 
 public class MainActivity extends Activity {
     private static final String TERMUX_PACKAGE = "com.termux";
+    // 记录"已同步到设备的是哪个版本的脚本包"。
+    // 有了它，版本没变时就不必把几十个脚本重新搬一遍——
+    // 那一步在手机上很慢，而且是在界面主线程上跑的，会让整片界面冻住。
+    private static final String BUNDLE_VERSION_PATH = "config/bundle-version";
+    // 部署目录建过一次就一直在，同一进程里不用反复确认。
+    private boolean storageDirsReady = false;
+    // 已经同步到设备的脚本包版本。记在内存里，
+    // 这样日常点按钮时连文件都不用读，直接放行。
+    private String syncedBundleVersion = null;
     private static final String EDGE_PACKAGE = "com.microsoft.emmx";
     private static final String TERMUX_SERVICE = "com.termux.app.RunCommandService";
     private static final String TERMUX_ACTION = "com.termux.RUN_COMMAND";
@@ -563,7 +572,15 @@ public class MainActivity extends Activity {
 
     private boolean ensurePublicStorage() {
         if (publicTreeUri == null || !DocumentStore.hasAccess(this, publicTreeUri)) {
+            // 权限没了就把"目录已备好"的标记也清掉，下次重新建
+            storageDirsReady = false;
             return false;
+        }
+        // 六个目录挨个检查一遍，在手机上就是六次系统调用。
+        // 以前每提交一次任务都做一遍，纯属白费；
+        // 目录建过一次就一直在，本次运行期间不必反复确认。
+        if (storageDirsReady) {
+            return true;
         }
         try {
             DocumentStore store = new DocumentStore(this, publicTreeUri);
@@ -573,6 +590,7 @@ public class MainActivity extends Activity {
             for (String dir : dirs) {
                 store.ensureDirectory(dir);
             }
+            storageDirsReady = true;
             return true;
         } catch (IOException exc) {
             return false;
@@ -594,9 +612,44 @@ public class MainActivity extends Activity {
                 result.put("message", "请先授权“手机端值班室”部署文件夹。");
                 return result.toString();
             }
+            // 先比一下版本，一致就直接收工。
+            // 以前每次点按钮都把几十个脚本整树覆盖一遍，
+            // 而且是逐文件走手机那套文档授权接口、在主线程上同步写，
+            // 几十次系统调用叠起来，界面会整片冻住好几秒，
+            // 用户看到的就是“提交任务后卡死大半天”。
+            String version = readAssetVersion();
+            // 内存里已经记着当前版本，且脚本还在，就直接放行——一次系统调用都不用。
+            if (!version.isEmpty()
+                    && version.equals(syncedBundleVersion)
+                    && new File(publicRoot, "bin/zbs.sh").isFile()) {
+                result.put("ok", true);
+                result.put("message", "终端组件已是最新");
+                result.put("path", publicRoot.getAbsolutePath());
+                return result.toString();
+            }
+            String installed = "";
+            try {
+                installed = publicStore().readText(BUNDLE_VERSION_PATH);
+            } catch (Exception ignored) {
+            }
+            if (!version.isEmpty()
+                    && version.equals(installed == null ? "" : installed.trim())
+                    && new File(publicRoot, "bin/zbs.sh").isFile()) {
+                syncedBundleVersion = version;
+                result.put("ok", true);
+                result.put("message", "终端组件已是最新");
+                result.put("path", publicRoot.getAbsolutePath());
+                return result.toString();
+            }
             copyAssetTree("bin", "bin");
             copyAssetTree("service", "service");
             copyAssetFile("VERSION", "VERSION");
+            try {
+                publicStore().writeBytes(BUNDLE_VERSION_PATH,
+                        version.getBytes(StandardCharsets.UTF_8));
+            } catch (Exception ignored) {
+            }
+            syncedBundleVersion = version;
             result.put("ok", true);
             result.put("message", "终端组件已同步");
             result.put("path", publicRoot.getAbsolutePath());
@@ -608,6 +661,21 @@ public class MainActivity extends Activity {
             }
         }
         return result.toString();
+    }
+
+    /** 读出打包时写进去的版本号，用来判断脚本包有没有更新过。 */
+    private String readAssetVersion() {
+        try (InputStream input = getAssets().open("VERSION")) {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[256];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+            return new String(output.toByteArray(), StandardCharsets.UTF_8).trim();
+        } catch (Exception exc) {
+            return "";
+        }
     }
 
     private void copyAssetTree(String assetPath, String targetPath) throws IOException {
@@ -1948,7 +2016,10 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public boolean portOpen(int port) {
-            return isPortOpenInternal(port, 350);
+            // 这一个是被界面每几秒轮询一次的。
+            // 超时给太长，实例一多就会把界面主线程成片占住，看起来就是"卡"。
+            // 本机端口连不上基本是立刻就知道，不需要等那么久。
+            return isPortOpenInternal(port, 120);
         }
 
         @JavascriptInterface
