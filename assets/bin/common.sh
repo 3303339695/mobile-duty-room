@@ -627,20 +627,72 @@ $url"
   die "${label}运行底座没装成。这几乎都是网络问题，不是手机不兼容。判断依据：日志里出现「manifest」「layer」「image config」「Authenticating」「SSL」「connection abort」这类字样，就说明底层工具在向镜像仓库要镜像时被网络掐断了。请按顺序试：一、把 ZeroTermux 加进代理的分应用名单（很多代理默认只代理浏览器，终端其实没走代理）；二、改用手机流量；三、换个时间段再试。验证方法：用手机浏览器打开 github.com 和 registry-1.docker.io，浏览器能开而终端不行，就是代理没覆盖终端"
 }
 
+# 把系统里的软件源换成国内镜像。
+# 官方源在国内经常慢到"看着像卡死"——尤其是几十兆的中文字体包。
+# 换源之后同样的东西往往快十倍以上。
+# 支持两种写法：老的 sources.list，和新的 sources.list.d 里的配置文件。
+switch_apt_mirror() {
+  local distro="$1"
+  local alias="$2"
+  local mirror="${ZBS_APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn}"
+  local script=""
+
+  case "$distro" in
+    debian)
+      script="
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+                 /etc/apt/sources.list.d/*.sources; do
+          [ -f \"\$f\" ] || continue
+          sed -i \
+            -e 's|http://deb.debian.org/debian|${mirror}/debian|g' \
+            -e 's|http://deb.debian.org/debian-security|${mirror}/debian-security|g' \
+            -e 's|http://security.debian.org|${mirror}/debian-security|g' \
+            -e 's|https://deb.debian.org/debian|${mirror}/debian|g' \
+            -e 's|https://deb.debian.org/debian-security|${mirror}/debian-security|g' \
+            \"\$f\" 2>/dev/null || true
+        done
+      "
+      ;;
+    ubuntu)
+      script="
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
+                 /etc/apt/sources.list.d/*.sources; do
+          [ -f \"\$f\" ] || continue
+          sed -i \
+            -e 's|http://archive.ubuntu.com/ubuntu|${mirror}/ubuntu|g' \
+            -e 's|http://security.ubuntu.com/ubuntu|${mirror}/ubuntu|g' \
+            -e 's|https://archive.ubuntu.com/ubuntu|${mirror}/ubuntu|g' \
+            -e 's|https://security.ubuntu.com/ubuntu|${mirror}/ubuntu|g' \
+            \"\$f\" 2>/dev/null || true
+        done
+      "
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  proot-distro login "$alias" -- /bin/bash -lc "$script" >/dev/null 2>&1 || true
+}
+
 ensure_ubuntu() {
   if proot_distro_alias_exists "$UBUNTU_ALIAS"; then
     log "Ubuntu proot 运行时已存在"
+    switch_apt_mirror "ubuntu" "$UBUNTU_ALIAS"
     return 0
   fi
   install_proot_distro "ubuntu" "$UBUNTU_ALIAS" "Ubuntu"
+  switch_apt_mirror "ubuntu" "$UBUNTU_ALIAS"
 }
 
 ensure_debian() {
   if proot_distro_alias_exists "$NAPCAT_ALIAS"; then
     log "Debian proot 运行时已存在"
+    switch_apt_mirror "debian" "$NAPCAT_ALIAS"
     return 0
   fi
   install_proot_distro "debian" "$NAPCAT_ALIAS" "Debian"
+  switch_apt_mirror "debian" "$NAPCAT_ALIAS"
 }
 
 proot_distro_alias_exists() {

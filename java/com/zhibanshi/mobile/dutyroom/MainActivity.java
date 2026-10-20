@@ -1077,6 +1077,46 @@ public class MainActivity extends Activity {
                 }
                 Toast.makeText(this, "请在 ZeroTermux 应用信息中开启悬浮窗权限", Toast.LENGTH_LONG).show();
                 return;
+            case "termux_app_perms": {
+                // ZeroTermux 自己缺「安装未知应用」或「管理所有文件」时，
+                // 部署会卡在下载或安装环节，而日志里完全看不出是权限问题。
+                // Android 不允许第三方应用直接改别的应用的这两项权限，
+                // 所以只能把用户送到对应的设置页，并明确告诉他该开哪两个。
+                Intent[] chain;
+                if (Build.VERSION.SDK_INT >= 26) {
+                    Intent installApps = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+                    installApps.setData(Uri.parse("package:" + TERMUX_PACKAGE));
+                    chain = new Intent[]{
+                            installApps,
+                            Build.VERSION.SDK_INT >= 30
+                                    ? new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                                    : installApps,
+                            new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                    .setData(Uri.parse("package:" + TERMUX_PACKAGE))
+                    };
+                } else {
+                    chain = new Intent[]{
+                            new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                    .setData(Uri.parse("package:" + TERMUX_PACKAGE))
+                    };
+                }
+                for (Intent candidate : chain) {
+                    try {
+                        startActivity(candidate);
+                        Toast.makeText(
+                                this,
+                                "请把「安装未知应用」和「管理所有文件」都允许给 ZeroTermux，然后回来重试",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    } catch (Exception ignored) {
+                    }
+                }
+                Toast.makeText(
+                        this,
+                        "请在系统设置里找到 ZeroTermux，允许它安装未知应用、管理所有文件",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
             default:
                 intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
                 intent.setData(Uri.parse("package:" + getPackageName()));

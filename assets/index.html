@@ -276,6 +276,9 @@
           <button class="button" id="fix-terminal">
             <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>终端权限
           </button>
+          <button class="button" id="termux-app-perms">
+            <svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 8h6"/><path d="M9 12h6"/><path d="M9 16h3"/></svg>零终端权限
+          </button>
           <button class="button" id="storage-permission">
             <svg viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/><path d="M12 11v6"/><path d="M9 14h6"/></svg>目录授权
           </button>
@@ -1234,6 +1237,11 @@
       else invoke("showTermuxSetup");
     };
     $("#fix-terminal").onclick = () => invoke("showTermuxSetup");
+    // ZeroTermux 自己的隐藏权限：部署卡在下载或安装时，多半是这两项没开。
+    $("#termux-app-perms").onclick = () => {
+      invoke("openSettings", "termux_app_perms");
+      record("已打开 ZeroTermux 权限设置入口");
+    };
     $("#storage-permission").onclick = () => invoke("openSettings", "all_files");
     $("#choose-backup-folder").onclick = () => invoke("chooseBackupFolder");
     $("#battery-permission").onclick = () => invoke("openSettings", "battery");
