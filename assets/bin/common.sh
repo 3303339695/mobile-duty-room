@@ -72,11 +72,13 @@ fail() {
 
 die() {
   local message="$*"
+  local line="${BASH_LINENO[0]:-0}"
   fail "$message"
   # 直接把失败原因写进任务状态文件。
   # 否则任务明明已经失败退出，界面却还停在"进行中"转圈，看不出到底出了什么事。
+  # 行号也一并记下来，界面就不会显示"未知位置"这种没用的信息。
   if [ -n "${TASK_STATUS_FILE:-}" ]; then
-    write_task_status "failed" 1 0 "$message" 2>/dev/null || true
+    write_task_status "failed" 1 "${line:-0}" "$message" 2>/dev/null || true
   fi
   exit 1
 }
@@ -334,29 +336,74 @@ stop_pid_file() {
   fi
 }
 
-ensure_ubuntu() {
-  if ! proot_distro_alias_exists "$UBUNTU_ALIAS"; then
-    log "安装 Ubuntu proot 运行时"
-    proot-distro install ubuntu --override-alias "$UBUNTU_ALIAS" || \
-      die "Ubuntu proot 安装失败"
-  else
-    log "Ubuntu proot 运行时已存在"
+# 探测 GitHub 是否可达。
+# 只用来在长时间等待之前先给用户一个明确提示，不参与真实下载。
+# 探测失败也不阻断流程（可能是探测方式被拦但下载能通），只是让提示更早出现。
+network_reachable() {
+  local host="${1:-github.com}"
+  local probe="https://$host"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsS -o /dev/null --connect-timeout 10 --max-time 20 "$probe" >/dev/null 2>&1 \
+      && return 0
+    return 1
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -q -O /dev/null --timeout=20 "$probe" >/dev/null 2>&1 && return 0
+    return 1
+  fi
+  return 0
+}
+
+# 装运行底座（ubuntu / debian）都要从 GitHub 下载几十兆的镜像，
+# 手机网络到 GitHub 不稳时会报 Errno 103（连接被掐断），
+# 所以这里先探一次，并在失败时告诉用户到底该干什么。
+install_proot_distro() {
+  local distro="$1"
+  local alias="$2"
+  local label="$3"
+  local root="$PROOT_ROOT/$alias"
+
+  # 上次下载中断会留下一个空壳目录，它会被误判成"已安装"，
+  # 于是后续每一步都失败。这里先把这个空壳清掉再重装。
+  if [ -d "$root" ] && [ ! -e "$root/rootfs/etc" ]; then
+    warn "发现上次没装完的${label}残留，先清理再重装"
+    rm -rf "$root" 2>/dev/null || true
+  fi
+
+  log "安装${label}运行底座"
+  warn "需要从 GitHub 下载运行镜像，请保持屏幕常亮、网络稳定"
+  if ! network_reachable "github.com"; then
+    die "现在连不上 GitHub，无法下载${label}运行底座。请先确认手机能打开 github.com（必要时开代理或改用手机流量），再重新点一次部署"
+  fi
+
+  if ! proot-distro install "$distro" --override-alias "$alias"; then
+    die "${label}运行底座下载中断（网络到 GitHub 不稳定）。请确认网络后重新点一次部署；已经下载一半的残留会在下次自动清理"
   fi
 }
 
-ensure_debian() {
-  if ! proot_distro_alias_exists "$NAPCAT_ALIAS"; then
-    log "安装 Debian proot 运行时"
-    proot-distro install debian --override-alias "$NAPCAT_ALIAS" || \
-      die "Debian proot 安装失败"
-  else
-    log "Debian proot 运行时已存在"
+ensure_ubuntu() {
+  if proot_distro_alias_exists "$UBUNTU_ALIAS"; then
+    log "Ubuntu proot 运行时已存在"
+    return 0
   fi
+  install_proot_distro "ubuntu" "$UBUNTU_ALIAS" "Ubuntu"
+}
+
+ensure_debian() {
+  if proot_distro_alias_exists "$NAPCAT_ALIAS"; then
+    log "Debian proot 运行时已存在"
+    return 0
+  fi
+  install_proot_distro "debian" "$NAPCAT_ALIAS" "Debian"
 }
 
 proot_distro_alias_exists() {
   local alias="$1"
-  [ -d "$PROOT_ROOT/$alias" ] && return 0
+  local root="$PROOT_ROOT/$alias"
+  # 装好的底座里一定有 rootfs/etc；下载中断只留空壳，不能当成已安装。
+  if [ -d "$root/rootfs" ] && [ -e "$root/rootfs/etc" ]; then
+    return 0
+  fi
   proot-distro login "$alias" -- /bin/true >/dev/null 2>&1 && return 0
   proot-distro list 2>/dev/null \
     | awk -v alias="$alias" '$1 == alias || $1 == alias ":" { found = 1 } END { exit !found }'

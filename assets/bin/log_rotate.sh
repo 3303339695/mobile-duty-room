@@ -10,7 +10,10 @@
 set -u
 export TZ="${TZ:-Asia/Shanghai}"
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# 用脚本自身的位置定位，而不是调用者的位置。
+# 这个文件既会被直接执行，也会被 watchdog.sh 引用进来，
+# 用 $0 在被引用时会指向调用者，导致找不到同目录的 common.sh。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=common.sh
 source "$SCRIPT_DIR/common.sh"
 

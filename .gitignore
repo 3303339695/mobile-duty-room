@@ -35,3 +35,6 @@ Thumbs.db
 # Local verification scratch files (layout probes, browser profiles, check output)
 .tmp-*
 .layout-*
+
+# 随手放到仓库根目录的日志文件（多为排查问题时从手机上取下来的），一律不入库
+*.log
