@@ -355,6 +355,129 @@ network_reachable() {
   return 0
 }
 
+# 从发行版配置里读出真实的下载地址和摘要。
+# 不依赖配置里的变量名，直接按"以 .tar.xz 结尾的地址"和"64 位十六进制摘要"去抓，
+# 这样底层工具改了变量名也不会失效；抓不到就让调用方回退到原来的联网安装。
+proot_distro_rootfs_info() {
+  local distro="$1"
+  local conf="$PREFIX/etc/proot-distro/$distro.sh"
+  [ -f "$conf" ] || return 1
+  local url sha
+  url="$(grep -oE 'https://[^"[:space:]]+\.tar\.xz' "$conf" 2>/dev/null | head -n 1)"
+  sha="$(grep -oE '[0-9a-f]{64}' "$conf" 2>/dev/null | head -n 1)"
+  [ -n "$url" ] || return 1
+  printf '%s\n%s\n' "$url" "$sha"
+}
+
+# 在本地找已经下好的镜像：先看缓存目录，再看手机下载目录。
+# 手机下载目录这一条是关键——浏览器走的是系统的网络，往往能打开用户手动下载，
+# 用户下完不用移动文件，这里会自动捡起来。
+find_local_rootfs() {
+  local name="$1"
+  local cache="$PREFIX/var/lib/proot-distro/dlcache"
+  local candidate
+  if [ -s "$cache/$name" ]; then
+    printf '%s' "$cache/$name"
+    return 0
+  fi
+  for candidate in \
+    "$HOME/storage/downloads/$name" \
+    "$HOME/storage/shared/Download/$name" \
+    "$HOME/storage/shared/下载/$name" \
+    "/storage/emulated/0/Download/$name" \
+    "/storage/emulated/0/下载/$name"; do
+    if [ -s "$candidate" ]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 断点续传下载单个文件。
+fetch_with_resume() {
+  local url="$1"
+  local output="$2"
+  mkdir -p "$(dirname "$output")" 2>/dev/null || true
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --retry 4 --retry-delay 3 --connect-timeout 20 -C - -# \
+      -o "$output" "$url" >&2 && [ -s "$output" ]
+    return $?
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -c --tries=4 --timeout=20 -O "$output" "$url" >&2 && [ -s "$output" ]
+    return $?
+  fi
+  return 1
+}
+
+# 把运行镜像提前备到缓存里，让底层工具安装时直接命中，不再联网。
+# 三步走：一、缓存里已经有且校验通过；二、从手机下载目录捡现成的；
+# 三、自己断点续传多源下载。任何一步成功，安装就几乎不会再因网络失败。
+prefetch_rootfs() {
+  local distro="$1"
+  local label="$2"
+  local info url sha name cache target found source
+  local -a sources=()
+
+  info="$(proot_distro_rootfs_info "$distro" 2>/dev/null || true)" || return 1
+  url="$(printf '%s' "$info" | sed -n '1p')"
+  sha="$(printf '%s' "$info" | sed -n '2p')"
+  [ -n "$url" ] || return 1
+
+  name="${url##*/}"
+  cache="$PREFIX/var/lib/proot-distro/dlcache"
+  mkdir -p "$cache" 2>/dev/null || true
+  target="$cache/$name"
+
+  # 一、缓存里已经有且校验通过
+  if [ -s "$target" ]; then
+    if [ -z "$sha" ] || \
+        [ "$(sha256_file "$target" | tr 'A-F' 'a-f')" = "$(printf '%s' "$sha" | tr 'A-F' 'a-f')" ]; then
+      ok "${label}镜像已在本地缓存，直接使用"
+      return 0
+    fi
+    warn "本地缓存的镜像校验不一致，丢弃重来"
+    rm -f "$target" 2>/dev/null || true
+  fi
+
+  # 二、手机下载目录里可能已经有用户用浏览器下好的
+  if found="$(find_local_rootfs "$name")" && [ -n "$found" ]; then
+    log "在手机下载目录发现镜像：$found"
+    if cp -f "$found" "$target" 2>/dev/null; then
+      if [ -z "$sha" ] || \
+          [ "$(sha256_file "$target" | tr 'A-F' 'a-f')" = "$(printf '%s' "$sha" | tr 'A-F' 'a-f')" ]; then
+        ok "已把下载好的镜像放进缓存"
+        return 0
+      fi
+      warn "这个文件校验不一致，不用它"
+      rm -f "$target" 2>/dev/null || true
+    fi
+  fi
+
+  # 三、自己下载：先试用户指定的加速源，再试官方地址，逐字节校验
+  if [ -n "${ZBS_GITHUB_MIRROR:-}" ]; then
+    sources+=("${ZBS_GITHUB_MIRROR%/}/$url")
+  fi
+  sources+=("$url")
+  for source in "${sources[@]}"; do
+    log "下载${label}镜像：$source"
+    if ! fetch_with_resume "$source" "$target"; then
+      warn "这个源没下成功，换下一个"
+      continue
+    fi
+    if [ -n "$sha" ] && \
+        [ "$(sha256_file "$target" | tr 'A-F' 'a-f')" != "$(printf '%s' "$sha" | tr 'A-F' 'a-f')" ]; then
+      warn "下载内容校验不一致，丢弃"
+      rm -f "$target" 2>/dev/null || true
+      continue
+    fi
+    ok "${label}镜像已就绪"
+    return 0
+  done
+  return 1
+}
+
 # 装运行底座（ubuntu / debian）都要从 GitHub 下载几十兆的镜像，
 # 手机网络到 GitHub 不稳时会报 Errno 103（连接被掐断）。
 install_proot_distro() {
@@ -379,8 +502,23 @@ install_proot_distro() {
     warn "提前探测没连上 GitHub，仍会尝试下载；若失败请检查网络、确认 ZeroTermux 也在代理范围内，或改用手机流量"
   fi
 
+  # 尽量先把镜像备到本地缓存：缓存命中、或从手机下载目录捡、或自己多源续传。
+  # 只要这一步成功，后面的安装就不再依赖终端能不能连上 GitHub。
+  if prefetch_rootfs "$distro" "$label"; then
+    log "镜像已备好，开始安装"
+  else
+    warn "没能提前备好镜像，交给安装器自己下载（它会重试多次）"
+  fi
+
   if ! proot-distro install "$distro" --override-alias "$alias"; then
-    die "${label}运行底座下载中断（网络到 GitHub 不稳定）。如果手机开着代理，请确认 ZeroTermux 也在代理范围内；已经下载一半的残留会在下次自动清理，确认网络后重新点一次部署即可"
+    local info url
+    info="$(proot_distro_rootfs_info "$distro" 2>/dev/null || true)"
+    url="$(printf '%s' "$info" | sed -n '1p')"
+    if [ -n "$url" ]; then
+      die "${label}运行底座下载失败。救急办法：用手机浏览器打开下面这个地址下载（浏览器一般能走代理），下完不用移动文件，直接回来再点一次部署，程序会自动从下载目录里把它捡起来：
+$url"
+    fi
+    die "${label}运行底座下载失败。请确认网络、确认 ZeroTermux 在代理范围内（很多代理默认只代理浏览器）、或改用手机流量后重试"
   fi
 }
 
@@ -432,12 +570,41 @@ sha256_file() {
   fi
 }
 
+# 从手机下载目录里"认领"用户已经下好的同名文件。
+# 原因：终端里的直连经常失败，但手机浏览器一般能走代理。
+# 用户只要用浏览器把文件下载到下载目录，这里就自动搬过来，
+# 不用手动移动、不用记路径、也不用额外敲命令。
+adopt_downloaded_file() {
+  local target="$1"
+  local name
+  name="$(basename "$target")"
+  [ -s "$target" ] && return 0
+  local candidate
+  for candidate in \
+    "$HOME/storage/downloads/$name" \
+    "$HOME/storage/shared/Download/$name" \
+    "$HOME/storage/shared/下载/$name" \
+    "/storage/emulated/0/Download/$name" \
+    "/storage/emulated/0/下载/$name"; do
+    if [ -s "$candidate" ]; then
+      mkdir -p "$(dirname "$target")" 2>/dev/null || true
+      if cp -f "$candidate" "$target" 2>/dev/null; then
+        log "从手机下载目录认领：$name"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
 download_file() {
   local url="$1"
   local output="$2"
   local sha="${3:-}"
   local optional="${4:-0}"
   mkdir -p "$(dirname "$output")"
+  # 下载之前先看看手机下载目录里有没有现成的同名文件
+  adopt_downloaded_file "$output" || true
   if [ -s "$output" ]; then
     if [ -n "$sha" ]; then
       local current
