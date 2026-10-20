@@ -18,6 +18,11 @@ else
   TASK_STATUS_FILE="$CONFIG_DIR/status/${ACTION}-$(date +%Y%m%d-%H%M%S).json"
 fi
 export TASK_STATUS_FILE
+# 抢任务锁：同一时间只允许一个任务在跑。
+# 两个任务同时去装软件包会把对方打断，留下"配置未完成"的半截状态，
+# 之后所有安装都会被挡住，所以宁可拒绝第二个任务。
+acquire_task_lock "$ACTION"
+trap 'release_task_lock' EXIT
 task_status_running "任务已开始"
 
 # 任务日志直接追加到当天文件，不经任何中间进程。
@@ -159,7 +164,9 @@ API Base URL: http://127.0.0.1:8000/v1
 EOF
     ;;
   stop-all)
-    ensure_termux_tools
+    # 停止服务只需要基础命令，不要调用 ensure_termux_tools：
+    # 那个函数在缺少命令时会触发软件包升级，和正在进行的初始化任务撞车，
+    # 会把安装过程打断成"配置未完成"的半截状态。
     source "$SCRIPT_DIR/astrbot_instance.sh"
     stop_all_astrbot || true
     source "$SCRIPT_DIR/deploy_napcat.sh"
@@ -169,7 +176,7 @@ EOF
     ok "所有后台服务已停止"
     ;;
   cleanup)
-    ensure_termux_tools
+    # 同上：清理缓存是轻量操作，绝不能在这里触发软件包升级。
     source "$SCRIPT_DIR/astrbot_instance.sh"
     stop_all_astrbot || true
     source "$SCRIPT_DIR/deploy_napcat.sh"

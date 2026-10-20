@@ -71,8 +71,43 @@ fail() {
 }
 
 die() {
-  fail "$*"
+  local message="$*"
+  fail "$message"
+  # 直接把失败原因写进任务状态文件。
+  # 否则任务明明已经失败退出，界面却还停在"进行中"转圈，看不出到底出了什么事。
+  if [ -n "${TASK_STATUS_FILE:-}" ]; then
+    write_task_status "failed" 1 0 "$message" 2>/dev/null || true
+  fi
   exit 1
+}
+
+TASK_LOCK_FILE="$CONFIG_DIR/task.lock"
+
+# 同一时间只允许一个任务在跑。
+# 手机上很容易出现"点了初始化，觉得卡住，又去点停服务并清缓存"这种情况，
+# 于是两个任务同时去动软件包管理：一个在装，另一个也在装/清缓存，
+# 互相把对方打断，留下"配置未完成"的半截状态，
+# 之后不管点什么都只会报同一句"安装被中断"，而且不会自己好。
+# 有了这把锁，第二个任务会直接被挡在门外并告诉用户先等一等。
+acquire_task_lock() {
+  local label="${1:-任务}"
+  local holder=""
+  mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+  if [ -f "$TASK_LOCK_FILE" ]; then
+    holder="$(cat "$TASK_LOCK_FILE" 2>/dev/null || true)"
+    # 只有持有者还活着才算真的在忙；上一次被系统杀掉留下的残锁会被自动接管。
+    if [[ "$holder" =~ ^[0-9]+$ ]] && [ "$holder" != "$$" ] && kill -0 "$holder" 2>/dev/null; then
+      die "已有一个任务正在执行，请等它结束后再操作，不要重复点击（占用的进程号 $holder）"
+    fi
+  fi
+  printf '%s\n' "$$" > "$TASK_LOCK_FILE" 2>/dev/null || true
+}
+
+release_task_lock() {
+  local holder
+  holder="$(cat "$TASK_LOCK_FILE" 2>/dev/null || true)"
+  [ "$holder" = "$$" ] || return 0
+  rm -f "$TASK_LOCK_FILE" 2>/dev/null || true
 }
 
 json_escape() {
@@ -173,6 +208,15 @@ ensure_termux_tools() {
 repair_termux_packages() {
   export DEBIAN_FRONTEND=noninteractive
   log "检查并修复 Termux 软件包状态"
+
+  # 手机上的终端经常因为息屏、切到后台被系统冻结，软件包装到一半就停在那里。
+  # 这种"配置未完成"的状态会让之后任何一次安装都直接报错退出，
+  # 必须先把这个半截的配置跑完，后面的升级和安装才有可能成功。
+  log "先完成上次被打断的软件包配置"
+  if ! dpkg --configure -a; then
+    warn "仍有软件包配置没有完成，稍后升级失败时会再补一次"
+  fi
+
   if ! apt-get update -o Acquire::Retries=3; then
     warn "现有软件源不可用，切换到 Termux 官方源后重试"
     mkdir -p "$PREFIX/etc/apt"
@@ -185,10 +229,11 @@ repair_termux_packages() {
 
   log "升级全部 Termux 软件包，修复 libcurl 等动态库错位"
   if ! apt-get -y -o Dpkg::Options::=--force-confold full-upgrade; then
-    warn "整体升级未一次完成，尝试修复损坏依赖后重试"
+    warn "整体升级未一次完成，先补完被打断的配置再修复依赖"
+    dpkg --configure -a || true
     apt-get -y --fix-broken install || true
     apt-get -y -o Dpkg::Options::=--force-confold full-upgrade || \
-      die "Termux 软件包修复失败"
+      die "Termux 软件包修复失败：请在 ZeroTermux 里手动执行「dpkg --configure -a」，完成后重新点“一键初始化”"
   fi
   hash -r
   ok "Termux 软件包状态已修复"
