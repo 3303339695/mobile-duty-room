@@ -21,7 +21,15 @@ export TASK_STATUS_FILE
 # 抢任务锁：同一时间只允许一个任务在跑。
 # 两个任务同时去装软件包会把对方打断，留下"配置未完成"的半截状态，
 # 之后所有安装都会被挡住，所以宁可拒绝第二个任务。
-acquire_task_lock "$ACTION"
+#
+# 但"停止"和"清理"这两个动作必须能强行接管：
+# 万一某个服务进程把锁攥死了，界面上连停止都点不动，
+# 用户就彻底没有退路了，只能重启整个终端。
+# 留下这条救火通道，局面永远能收回来。
+case "$ACTION" in
+  cleanup|stop-all) acquire_task_lock "$ACTION" 1 ;;
+  *) acquire_task_lock "$ACTION" ;;
+esac
 trap 'release_task_lock' EXIT
 task_status_running "任务已开始"
 

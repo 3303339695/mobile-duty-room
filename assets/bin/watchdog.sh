@@ -76,6 +76,7 @@ while :; do
   fi
 
   if [ -f "$HOME_ROOT/config/desired-napcat" ] \
+      && service_past_grace "$HOME_ROOT/config/desired-napcat" 180 \
       && ! is_port_open 6099 \
       && [ ! -e "$NAPCAT_LOCK" ]; then
     touch "$NAPCAT_LOCK"
@@ -83,7 +84,10 @@ while :; do
     ("$PUBLIC_ROOT/bin/zbs.sh" start-napcat >/dev/null 2>&1; rm -f "$NAPCAT_LOCK") &
   fi
 
+  # 向量服务光加载模型就要几十秒，这期间端口还没开。
+  # 必须等过了宽限期再判定，否则会把"还在启动"当成"已经掉了"，反复恢复、越帮越乱。
   if [ -f "$HOME_ROOT/config/desired-minilm" ] \
+      && service_past_grace "$HOME_ROOT/config/desired-minilm" 180 \
       && ! is_port_open 8000 \
       && [ ! -e "$MINILM_LOCK" ]; then
     touch "$MINILM_LOCK"
@@ -100,7 +104,7 @@ while :; do
     port="$(json_value "$dir/instance.json" port "0")"
     [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1024 ] || continue
     lock="$dir/watchdog-start.lock"
-    if ! is_port_open "$port" && [ ! -e "$lock" ]; then
+    if service_past_grace "$desired" 180 && ! is_port_open "$port" && [ ! -e "$lock" ]; then
       touch "$lock"
       log "检测到 AstrBot 实例 $id 端口 $port 掉线，尝试恢复"
       cp -f "$dir/instance.json" "$request" 2>/dev/null || continue

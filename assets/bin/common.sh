@@ -93,12 +93,17 @@ TASK_LOCK_FILE="$CONFIG_DIR/task.lock"
 # 有了这把锁，第二个任务会直接被挡在门外并告诉用户先等一等。
 acquire_task_lock() {
   local label="${1:-任务}"
+  # 第二个参数为 1 时表示"救火任务"，可以强行接管卡死的锁。
+  # 只有停止、清理这类动作能用：万一服务进程把锁攥死了，
+  # 这就是用户唯一能把局面收回来的通道，不给强制接管会变成死循环。
+  local force="${2:-0}"
   local holder=""
   mkdir -p "$CONFIG_DIR" 2>/dev/null || true
   if [ -f "$TASK_LOCK_FILE" ]; then
     holder="$(cat "$TASK_LOCK_FILE" 2>/dev/null || true)"
-    # 只有持有者还活着才算真的在忙；上一次被系统杀掉留下的残锁会被自动接管。
-    if [[ "$holder" =~ ^[0-9]+$ ]] && [ "$holder" != "$$" ] && kill -0 "$holder" 2>/dev/null; then
+    if [ "$force" = "1" ]; then
+      warn "强制接管任务锁（上一个占用者：${holder:-未知}）"
+    elif [[ "$holder" =~ ^[0-9]+$ ]] && [ "$holder" != "$$" ] && kill -0 "$holder" 2>/dev/null; then
       die "还有一个任务正在跑（进程号 $holder），这一步先没执行——等它跑完再点一次就好，不是出错。同一个时间只允许一个任务，是为了避免两个任务同时改系统把对方弄坏"
     fi
   fi
@@ -110,6 +115,22 @@ release_task_lock() {
   holder="$(cat "$TASK_LOCK_FILE" 2>/dev/null || true)"
   [ "$holder" = "$$" ] || return 0
   rm -f "$TASK_LOCK_FILE" 2>/dev/null || true
+}
+
+# 服务刚启动时给它留出加载时间，看门狗不要急着判定掉线。
+# 向量服务光加载模型就要几十秒，这期间端口还没开；
+# 看门狗如果照旧每 20 秒查一次，就会把"还在启动"误判成"已经掉了"，
+# 于是反复尝试恢复，和正在启动的任务打架。
+# 传入的是服务启动时写的那个"想要运行"标记文件，用它的写入时间算年龄。
+service_past_grace() {
+  local marker="$1"
+  local grace="${2:-180}"
+  [ -f "$marker" ] || return 1
+  local started now
+  started="$(date -r "$marker" +%s 2>/dev/null || echo 0)"
+  now="$(date +%s)"
+  [[ "$started" =~ ^[0-9]+$ ]] || return 0
+  [ $((now - started)) -ge "$grace" ]
 }
 
 json_escape() {
