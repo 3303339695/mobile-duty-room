@@ -185,6 +185,8 @@ start_napcat() {
     > "$HOME_ROOT/config/watchdog-napcat.log.offset"
   touch "$HOME_ROOT/config/desired-napcat"
   echo $$ > "$pid_file"
+  # 即将被替换成服务进程，先放掉任务锁，否则它会一直被占着
+  release_task_lock
   exec proot-distro login "$NAPCAT_ALIAS" \
     --bind "$HOME_ROOT:/opt/zhibanshi" \
     --bind "$PUBLIC_ROOT:/opt/zhibanshi-public" \

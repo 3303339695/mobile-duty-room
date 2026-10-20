@@ -136,6 +136,8 @@ start_minilm() {
   ensure_watchdog
   touch "$HOME_ROOT/config/desired-minilm"
   echo $$ > "$pid_file"
+  # 即将被替换成服务进程，先放掉任务锁，否则它会一直被占着
+  release_task_lock
   exec proot-distro login "$UBUNTU_ALIAS" \
     --bind "$HOME_ROOT:/opt/zhibanshi" \
     --bind "$PUBLIC_ROOT:/opt/zhibanshi-public" \

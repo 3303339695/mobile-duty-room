@@ -92,6 +92,11 @@ start_instance() {
   prepare_log_dir "astrbot/$id"
   touch "$dir/desired"
   echo $$ > "$pid_file"
+  # 关键：立刻把任务锁放掉。
+  # 下面这一句会把当前进程直接替换成服务进程，脚本的退出清理不会再执行，
+  # 如果继续占着锁，之后所有操作（停止、看门狗恢复、再点部署）都会被拒绝，
+  # 界面上就会一直显示"还有一个任务正在跑"。
+  release_task_lock
   # 实例日志直接追加到 logs/astrbot/<实例ID>/<日期>.log。
   # 前端下拉框里的「全部 AstrBot」由 App 读取时把各实例当天的日志汇总起来，
   # 所以这里不需要再写一份汇总文件，也就完全不需要管道（管道会堵死服务、SIGPIPE 会杀掉守护进程）。
