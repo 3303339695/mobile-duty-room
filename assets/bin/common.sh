@@ -337,26 +337,26 @@ stop_pid_file() {
 }
 
 # 探测 GitHub 是否可达。
-# 只用来在长时间等待之前先给用户一个明确提示，不参与真实下载。
-# 探测失败也不阻断流程（可能是探测方式被拦但下载能通），只是让提示更早出现。
+# 探测 GitHub 是否可达。
+# 只用来在长时间等待之前先给用户一句提醒，绝不参与"能不能下载"的最终判断。
+# 注意：某些代理或分应用分流环境下，探测结果与真实下载并不一致，
+# 所以调用方只把它当作提示，不当作拦截条件。
 network_reachable() {
   local host="${1:-github.com}"
-  local probe="https://$host"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsS -o /dev/null --connect-timeout 10 --max-time 20 "$probe" >/dev/null 2>&1 \
+    curl -fsS -o /dev/null --connect-timeout 8 --max-time 15 "https://$host" >/dev/null 2>&1 \
       && return 0
     return 1
   fi
   if command -v wget >/dev/null 2>&1; then
-    wget -q -O /dev/null --timeout=20 "$probe" >/dev/null 2>&1 && return 0
+    wget -q -O /dev/null --timeout=15 "https://$host" >/dev/null 2>&1 && return 0
     return 1
   fi
   return 0
 }
 
 # 装运行底座（ubuntu / debian）都要从 GitHub 下载几十兆的镜像，
-# 手机网络到 GitHub 不稳时会报 Errno 103（连接被掐断），
-# 所以这里先探一次，并在失败时告诉用户到底该干什么。
+# 手机网络到 GitHub 不稳时会报 Errno 103（连接被掐断）。
 install_proot_distro() {
   local distro="$1"
   local alias="$2"
@@ -373,11 +373,14 @@ install_proot_distro() {
   log "安装${label}运行底座"
   warn "需要从 GitHub 下载运行镜像，请保持屏幕常亮、网络稳定"
   if ! network_reachable "github.com"; then
-    die "现在连不上 GitHub，无法下载${label}运行底座。请先确认手机能打开 github.com（必要时开代理或改用手机流量），再重新点一次部署"
+    # 探测只是提前打个招呼，不拦路：
+    # 开着代理、分应用分流、或者探测方式被拦的环境下都可能误判，
+    # 到底能不能下载，交给下载器自己判断（它内部会重试多次）。
+    warn "提前探测没连上 GitHub，仍会尝试下载；若失败请检查网络、确认 ZeroTermux 也在代理范围内，或改用手机流量"
   fi
 
   if ! proot-distro install "$distro" --override-alias "$alias"; then
-    die "${label}运行底座下载中断（网络到 GitHub 不稳定）。请确认网络后重新点一次部署；已经下载一半的残留会在下次自动清理"
+    die "${label}运行底座下载中断（网络到 GitHub 不稳定）。如果手机开着代理，请确认 ZeroTermux 也在代理范围内；已经下载一半的残留会在下次自动清理，确认网络后重新点一次部署即可"
   fi
 }
 

@@ -67,18 +67,37 @@ grep -q 'proot-distro install ubuntu' "$CALL_LOG" \
   || fail "没有执行安装命令，实际记录：$(cat "$CALL_LOG" 2>/dev/null)"
 printf '通过：重装前清理空壳，并执行了安装命令\n'
 
-# 四、连不上下载站时立刻报错并给出指引，而不是硬等到超时
+# 四、探测失败只提醒、不拦路：仍会尝试下载
+#    （开着代理、分应用分流的环境里，探测方式可能和真实下载不一致，不能一棒子打死）
 rm -rf "$PROOT_ROOT/zbs-ubuntu"
 : > "$CALL_LOG"
-# 这一句预期就会失败，用 || 接住，免得被脚本自己的错误拦截当成致命错误
 code=0
 output="$(NETWORK_DOWN=1 ensure_ubuntu 2>&1)" || code=$?
-[ "$code" -ne 0 ] || fail "连不上下载站时居然返回成功"
-printf '%s' "$output" | grep -q '连不上 GitHub' \
-  || fail "失败提示里没有说明是网络问题，实际输出：$output"
-if grep -q 'proot-distro install' "$CALL_LOG"; then
-  fail "已经知道连不上，却还是去执行了下载命令"
-fi
-printf '通过：连不上下载站时立刻提示网络问题，不盲目下载\n'
+[ "$code" -eq 0 ] || fail "探测失败不该拦路，实际退出码 $code，输出：$output"
+grep -q 'proot-distro install' "$CALL_LOG" \
+  || fail "探测失败后没有继续尝试下载，实际记录：$(cat "$CALL_LOG" 2>/dev/null)"
+printf '%s' "$output" | grep -q '仍会尝试下载' \
+  || fail "没有给出"仍会尝试下载"的提示，实际输出：$output"
+printf '通过：探测失败只提醒，仍会尝试下载\n'
+
+# 五、真实下载失败时才报错，并且要说清楚怎么办
+cat > "$root/bin/proot-distro" <<'FAKE'
+#!/usr/bin/env bash
+printf 'proot-distro %s\n' "$*" >> "$CALL_LOG"
+case "$1" in
+  install) exit 1 ;;
+  login) exit 1 ;;
+  *) exit 0 ;;
+esac
+FAKE
+chmod +x "$root/bin/proot-distro"
+rm -rf "$PROOT_ROOT/zbs-ubuntu"
+: > "$CALL_LOG"
+code=0
+output="$(NETWORK_DOWN=1 ensure_ubuntu 2>&1)" || code=$?
+[ "$code" -ne 0 ] || fail "下载失败却没有报错"
+printf '%s' "$output" | grep -q '下载中断' \
+  || fail "下载失败的提示不明确，实际输出：$output"
+printf '通过：下载失败时给出明确指引\n'
 
 printf '\n运行底座安装验收：全部通过\n'
