@@ -448,18 +448,41 @@ find_local_rootfs() {
   return 1
 }
 
-# 断点续传下载单个文件。
+# 下载前先问一下文件多大，好告诉用户要等多久。
+# 这里绝不能开下载器自带的进度条：它每涨一点点就刷一行，
+# 一个几十兆的文件能把日志刷到爆，界面就只剩"仅显示最后 256 KB"，
+# 反而什么有用信息都看不见。
+announce_download_size() {
+  local url="$1"
+  local label="$2"
+  local bytes
+  bytes="$(curl -sIL --connect-timeout 8 --max-time 15 "$url" 2>/dev/null \
+    | tr -d '\r' \
+    | awk 'tolower($1) == "content-length:" { size = $2 } END { print size }')"
+  if [[ "$bytes" =~ ^[0-9]+$ ]] && [ "$bytes" -gt 0 ]; then
+    if [ "$bytes" -ge 1048576 ]; then
+      log "正在下载${label}（约 $((bytes / 1048576)) MB），请耐心等待"
+    else
+      log "正在下载${label}（约 $((bytes / 1024)) KB）"
+    fi
+    return 0
+  fi
+  log "正在下载${label}，请耐心等待"
+  return 0
+}
+
+# 断点续传下载单个文件。静默进行，不往日志里刷进度条。
 fetch_with_resume() {
   local url="$1"
   local output="$2"
   mkdir -p "$(dirname "$output")" 2>/dev/null || true
   if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 4 --retry-delay 3 --connect-timeout 20 -C - -# \
+    curl -fsSL --retry 4 --retry-delay 3 --connect-timeout 20 -C - \
       -o "$output" "$url" >&2 && [ -s "$output" ]
     return $?
   fi
   if command -v wget >/dev/null 2>&1; then
-    wget -c --tries=4 --timeout=20 -O "$output" "$url" >&2 && [ -s "$output" ]
+    wget -q -c --tries=4 --timeout=20 -O "$output" "$url" >&2 && [ -s "$output" ]
     return $?
   fi
   return 1
@@ -780,15 +803,16 @@ download_file() {
       return
     fi
   fi
-  log "下载：$url"
-  if ! curl -fL --retry 3 --connect-timeout 20 -# "$url" -o "$output"; then
+  # 先告诉用户要下多大，再静默下载——进度条会把日志刷爆
+  announce_download_size "$url" " $(basename "$output")"
+  if ! curl -fsSL --retry 3 --connect-timeout 20 "$url" -o "$output"; then
     rm -f "$output" 2>/dev/null || true
     warn "curl 下载失败，尝试使用 wget"
     if ! command -v wget >/dev/null 2>&1; then
       [ "$optional" = "1" ] && return 1
       die "下载失败：$(basename "$output")"
     fi
-    if ! wget --tries=3 --timeout=20 -O "$output" "$url"; then
+    if ! wget -q --tries=3 --timeout=20 -O "$output" "$url"; then
       rm -f "$output" 2>/dev/null || true
       [ "$optional" = "1" ] && return 1
       die "下载失败：$(basename "$output")"
