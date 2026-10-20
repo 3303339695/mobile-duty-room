@@ -341,8 +341,7 @@ stop_pid_file() {
   fi
 }
 
-# 探测 GitHub 是否可达。
-# 探测 GitHub 是否可达。
+# 探测某个站点是否可达。
 # 只用来在长时间等待之前先给用户一句提醒，绝不参与"能不能下载"的最终判断。
 # 注意：某些代理或分应用分流环境下，探测结果与真实下载并不一致，
 # 所以调用方只把它当作提示，不当作拦截条件。
@@ -358,6 +357,56 @@ network_reachable() {
     return 1
   fi
   return 0
+}
+
+# 找出手机代理软件在本机开的通道端口。
+# 手机上开了代理，浏览器知道走它，但终端默认不知道——这就是
+# "浏览器能下载、终端死活连不上"的最常见原因。
+# 这里把主流代理软件的常见端口挨个试一遍，谁开着就是谁。
+detect_local_proxy_port() {
+  local port
+  for port in 7890 7891 7897 10809 10808 1080 8889 8080 2080 20171 6152; do
+    if is_port_open "$port"; then
+      printf '%s' "$port"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# 让终端的网络流量也走本机代理。
+# 安全性：设置之后立刻验证一次能不能连通，连不通就撤销，
+# 避免把本来能用的网络搞坏。
+ZBS_PROXY_READY=0
+ensure_proxy_for_downloads() {
+  [ "$ZBS_PROXY_READY" = "1" ] && return 0
+  ZBS_PROXY_READY=1
+
+  # 用户自己设过代理就别插手
+  if [ -n "${https_proxy:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then
+    log "沿用已有的代理设置"
+    return 0
+  fi
+
+  local port
+  port="$(detect_local_proxy_port 2>/dev/null || true)"
+  [ -n "$port" ] || return 0
+
+  local proxy_url="http://127.0.0.1:$port"
+  export http_proxy="$proxy_url"
+  export https_proxy="$proxy_url"
+  export HTTP_PROXY="$proxy_url"
+  export HTTPS_PROXY="$proxy_url"
+
+  if network_reachable "github.com"; then
+    log "检测到本机代理端口 $port，已让终端流量走代理"
+    return 0
+  fi
+
+  # 连不通就撤销，别把原本正常的网络弄坏
+  unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
+  warn "本机端口 $port 看起来像代理但连不通，已忽略它"
+  return 1
 }
 
 # 从发行版配置里读出真实的下载地址和摘要。
@@ -515,6 +564,10 @@ install_proot_distro() {
   local root="$PROOT_ROOT/$alias"
   local cleaned=0
 
+  # 动手之前，先把"代理只覆盖浏览器、终端没走"这个问题解决掉。
+  # 这是手机上"浏览器能下载、终端连不上"的头号原因。
+  ensure_proxy_for_downloads || true
+
   # 一、清磁盘残留（下载中断留下的空壳）
   if [ -d "$root" ] && [ ! -e "$root/rootfs/etc" ]; then
     warn "发现上次没装完的${label}残留，先清理再重装"
@@ -571,7 +624,7 @@ install_proot_distro() {
     die "${label}运行底座没装成。救急办法：用手机浏览器打开下面这个地址下载（浏览器一般能走代理），下完不用移动文件，直接回来再点一次部署，程序会自动从手机的下载文件夹里把它捡起来：
 $url"
   fi
-  die "${label}运行底座没装成。如果日志里出现「manifest」「layer」「image config」这类字样，说明这台手机的底层工具是从镜像仓库拉取的，必须让终端本身能访问外网：请检查代理是否覆盖 ZeroTermux（很多代理默认只代理浏览器），或者改用手机流量后重试"
+  die "${label}运行底座没装成。这几乎都是网络问题，不是手机不兼容。判断依据：日志里出现「manifest」「layer」「image config」「Authenticating」「SSL」「connection abort」这类字样，就说明底层工具在向镜像仓库要镜像时被网络掐断了。请按顺序试：一、把 ZeroTermux 加进代理的分应用名单（很多代理默认只代理浏览器，终端其实没走代理）；二、改用手机流量；三、换个时间段再试。验证方法：用手机浏览器打开 github.com 和 registry-1.docker.io，浏览器能开而终端不行，就是代理没覆盖终端"
 }
 
 ensure_ubuntu() {
@@ -655,6 +708,8 @@ download_file() {
   local output="$2"
   local sha="${3:-}"
   local optional="${4:-0}"
+  # 需要联网之前，先把"终端没走代理"这个问题处理掉
+  ensure_proxy_for_downloads || true
   mkdir -p "$(dirname "$output")"
   # 下载之前先看看手机下载目录里有没有现成的同名文件
   adopt_downloaded_file "$output" || true

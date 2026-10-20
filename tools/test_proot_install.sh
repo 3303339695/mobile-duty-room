@@ -119,7 +119,7 @@ printf '%s' "$output" | grep -q '没装成' \
   || fail "安装失败的提示不明确，实际输出：$output"
 install_times="$(grep -c 'proot-distro install' "$CALL_LOG")"
 [ "$install_times" -ge 2 ] || fail "失败后没有自动重试，实际安装次数 $install_times"
-printf '%s' "$output" | grep -qE '救急办法|代理是否覆盖' \
+printf '%s' "$output" | grep -qE '分应用名单|改用手机流量|救急办法' \
   || fail "没有给出下一步的指引，实际输出：$output"
 printf '通过：安装失败会自动重试，并给出下一步指引\n'
 
