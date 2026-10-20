@@ -867,9 +867,14 @@
         if (!task.silent) record(`${task.label}：${detail}${message}`);
         if (!task.silent) showToast(`${task.label}：${detail}`);
       } else if (status.state === "failed") {
-        const line = status.line ? `第 ${status.line} 行` : "未知位置";
-        if (!task.silent) record(`${task.label}：失败（${line}，退出码 ${status.code || "未知"}）`);
-        if (!task.silent) showToast(`${task.label}失败，请查看后台日志`);
+        // 失败原因比行号有用得多：行号对着代码看才有意义，用户看的是"到底哪儿出问题"。
+        const reason = String(status.message || "").trim();
+        const where = status.line ? `第 ${status.line} 行` : "";
+        const tail = reason
+          ? `：${reason}`
+          : (where ? `（${where}，退出码 ${status.code || "未知"}）` : "，请查看后台日志");
+        if (!task.silent) record(`${task.label} 失败${tail}`);
+        if (!task.silent) showToast(`${task.label}失败${reason ? "：" + reason.slice(0, 40) : ""}`);
       } else {
         if (!task.silent) record(`${task.label}：仍在执行，${status.message || "请查看后台日志"}`);
       }
@@ -908,9 +913,13 @@
             }
             return { ok: false, request: result.request, ...status };
           }
-          const line = status.line ? `第 ${status.line} 行` : "未知位置";
           if (!options.silent) {
-            record(`${label || action}：失败（${line}，退出码 ${status.code || "未知"}）`);
+            const reason = String(status.message || "").trim();
+            const where = status.line ? `第 ${status.line} 行` : "";
+            const tail = reason
+              ? `：${reason}`
+              : (where ? `（${where}，退出码 ${status.code || "未知"}）` : "，请查看后台日志");
+            record(`${label || action} 失败${tail}`);
           }
           return { ok: false, request: result.request, ...status };
         }

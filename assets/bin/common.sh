@@ -99,7 +99,7 @@ acquire_task_lock() {
     holder="$(cat "$TASK_LOCK_FILE" 2>/dev/null || true)"
     # 只有持有者还活着才算真的在忙；上一次被系统杀掉留下的残锁会被自动接管。
     if [[ "$holder" =~ ^[0-9]+$ ]] && [ "$holder" != "$$" ] && kill -0 "$holder" 2>/dev/null; then
-      die "已有一个任务正在执行，请等它结束后再操作，不要重复点击（占用的进程号 $holder）"
+      die "还有一个任务正在跑（进程号 $holder），这一步先没执行——等它跑完再点一次就好，不是出错。同一个时间只允许一个任务，是为了避免两个任务同时改系统把对方弄坏"
     fi
   fi
   printf '%s\n' "$$" > "$TASK_LOCK_FILE" 2>/dev/null || true
@@ -680,6 +680,8 @@ switch_apt_mirror() {
       "
       ;;
     ubuntu)
+      # 手机是 arm64，官方源不是 archive.ubuntu.com，而是 ports.ubuntu.com。
+      # 这个地址在国内同样很慢，漏掉它等于换源白做，所以两套都要换。
       script="
         for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list \
                  /etc/apt/sources.list.d/*.sources; do
@@ -689,6 +691,10 @@ switch_apt_mirror() {
             -e 's|http://security.ubuntu.com/ubuntu|${mirror}/ubuntu|g' \
             -e 's|https://archive.ubuntu.com/ubuntu|${mirror}/ubuntu|g' \
             -e 's|https://security.ubuntu.com/ubuntu|${mirror}/ubuntu|g' \
+            -e 's|http://ports.ubuntu.com/ubuntu-ports|${mirror}/ubuntu-ports|g' \
+            -e 's|https://ports.ubuntu.com/ubuntu-ports|${mirror}/ubuntu-ports|g' \
+            -e 's|http://ports.ubuntu.com|${mirror}/ubuntu-ports|g' \
+            -e 's|https://ports.ubuntu.com|${mirror}/ubuntu-ports|g' \
             \"\$f\" 2>/dev/null || true
         done
       "
