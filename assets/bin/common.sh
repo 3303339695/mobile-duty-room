@@ -319,6 +319,33 @@ pid_running() {
   kill -0 "$pid" 2>/dev/null
 }
 
+# 结束占用某个本机端口的进程。
+# 用在"服务其实已经崩了，但尸体还占着端口，导致新的起不来"这种情况。
+# 只杀真正监听这个端口的进程，不问名字，所以不会误伤同一个程序的其他实例。
+kill_port_owner() {
+  local port="$1"
+  local hex_port inodes pid inode found
+
+  hex_port="$(printf '%04X' "$port")"
+  # /proc/net/tcp 里状态 0A 表示正在监听，第 10 列是 socket 的编号
+  inodes="$(awk -v suffix=":$hex_port" '
+    $2 ~ suffix "$" && $4 == "0A" { print $10 }
+  ' /proc/net/tcp /proc/net/tcp6 2>/dev/null | sort -u)"
+  [ -n "$inodes" ] || return 1
+
+  found=0
+  for pid in /proc/[0-9]*; do
+    [ -d "$pid/fd" ] || continue
+    for inode in $inodes; do
+      if ls -l "$pid/fd" 2>/dev/null | grep -q "socket:\[$inode\]"; then
+        kill -TERM "$(basename "$pid")" 2>/dev/null && found=1
+        break
+      fi
+    done
+  done
+  [ "$found" = "1" ]
+}
+
 ensure_watchdog() {
   local pid_file="$HOME_ROOT/config/watchdog.pid"
   local watchdog="$HOME_ROOT/bin/watchdog.sh"

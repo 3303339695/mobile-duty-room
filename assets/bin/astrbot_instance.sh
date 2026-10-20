@@ -66,10 +66,22 @@ start_instance() {
   ubuntu_shell '[ -x /root/astrbot-venv/bin/astrbot ]' >/dev/null 2>&1 || \
     die "AstrBot 运行底座尚未部署"
 
-  if pid_running "$pid_file" || is_port_open "$port"; then
+  if pid_running "$pid_file"; then
     warn "实例“$name”已经在运行，端口 $port"
     sleep 2
     return
+  fi
+
+  # 进程不在了、端口却还被人占着——多半是上一次没收干净的残留。
+  # 这种情况如果直接判定"已经在运行"，用户看到的就是"点了启动毫无反应"，
+  # 而日志里却冒出一句"地址已被占用"，两头对不上，越看越懵。
+  if is_port_open "$port"; then
+    warn "端口 $port 被上一次的残留进程占着，先把它清掉再启动"
+    kill_port_owner "$port" || true
+    sleep 3
+    if is_port_open "$port"; then
+      die "端口 $port 还是被占着，稍等片刻再点一次启动；如果一直不行，就在实例配置里换一个端口"
+    fi
   fi
 
   echo "============================================================"

@@ -121,10 +121,19 @@ start_minilm() {
   [ -f "$model_dir/config.json" ] || die "MiniLM 模型尚未部署"
   ubuntu_shell '[ -x /root/minilm-venv/bin/python ]' >/dev/null 2>&1 || \
     die "MiniLM Python 环境尚未部署"
-  if pid_running "$pid_file" || is_port_open 8000; then
+  if pid_running "$pid_file"; then
     warn "MiniLM 服务已经在运行"
     sleep 2
     return
+  fi
+  # 进程没了、端口还占着，是上一次的残留，清掉才能起新的
+  if is_port_open 8000; then
+    warn "端口 8000 被上一次的残留进程占着，先清掉再启动"
+    kill_port_owner 8000 || true
+    sleep 3
+    if is_port_open 8000; then
+      die "端口 8000 还是被占着，稍等片刻再点一次启动"
+    fi
   fi
   echo "============================================================"
   echo "启动 MiniLM 本地向量服务"

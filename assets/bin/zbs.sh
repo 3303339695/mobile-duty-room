@@ -18,6 +18,16 @@ else
   TASK_STATUS_FILE="$CONFIG_DIR/status/${ACTION}-$(date +%Y%m%d-%H%M%S).json"
 fi
 export TASK_STATUS_FILE
+
+# 守护服务的心跳必须先处理掉，而且不能走下面的加锁流程。
+# 它每隔一阵就来一次，如果也去抢那把任务锁，
+# 用户点任何按钮都会跟它抢，表现就是"提交任务后卡死大半天、什么都点不动"。
+# 心跳的职责只有一件：确认守护进程还活着，顺手拉起来就走，不留痕迹。
+if [ "$ACTION" = "start-watchdog" ]; then
+  ensure_watchdog >/dev/null 2>&1 || true
+  exit 0
+fi
+
 # 抢任务锁：同一时间只允许一个任务在跑。
 # 两个任务同时去装软件包会把对方打断，留下"配置未完成"的半截状态，
 # 之后所有安装都会被挡住，所以宁可拒绝第二个任务。

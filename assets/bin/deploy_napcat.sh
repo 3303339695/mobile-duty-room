@@ -165,10 +165,19 @@ start_napcat() {
   pid_file="$(napcat_pid_file)"
   [ -f "$qq_bin" ] || die "NapCat 尚未部署"
   ensure_napcat_o3_hook || die "NapCat o3HookMode 配置写入失败"
-  if pid_running "$pid_file" || is_port_open 6099; then
+  if pid_running "$pid_file"; then
     warn "NapCat 已经在运行"
     sleep 2
     return
+  fi
+  # 进程没了、端口还占着，是上一次的残留，清掉才能起新的
+  if is_port_open 6099; then
+    warn "端口 6099 被上一次的残留进程占着，先清掉再启动"
+    kill_port_owner 6099 || true
+    sleep 3
+    if is_port_open 6099; then
+      die "端口 6099 还是被占着，稍等片刻再点一次启动"
+    fi
   fi
   echo "============================================================"
   echo "启动 NapCat QQ v$NAPCAT_VERSION"
