@@ -18,13 +18,19 @@ mkdir -p "$HOME" "$PREFIX" "$ZBS_HOME_ROOT" "$root/public/bin" "$root/bin"
 cp "$base/assets/bin/common.sh" "$root/public/bin/common.sh"
 
 # 假的下载器与安装器：只记录被怎么调用
+# LIST_SAYS_INSTALLED=1 用来模拟"底层工具登记表里还挂着这个实例"
 cat > "$root/bin/proot-distro" <<'FAKE'
 #!/usr/bin/env bash
 printf 'proot-distro %s\n' "$*" >> "$CALL_LOG"
 case "$1" in
   # 没装好就登不进去，与真实行为一致
   login) exit 1 ;;
-  list) exit 0 ;;
+  list)
+    if [ "${LIST_SAYS_INSTALLED:-0}" = "1" ]; then
+      printf 'zbs-ubuntu\n'
+    fi
+    exit 0
+    ;;
   *) exit 0 ;;
 esac
 FAKE
@@ -49,6 +55,16 @@ if proot_distro_alias_exists "zbs-ubuntu"; then
 fi
 printf '通过：空壳目录不会被误判成已安装\n'
 
+# 一·补、底层工具登记表里挂着、但磁盘上没有内容，同样不能算已安装
+#      （这正是"看起来装着、一登录就崩、想重装又报同名已存在"的死循环来源）
+: > "$CALL_LOG"
+export LIST_SAYS_INSTALLED=1
+if proot_distro_alias_exists "zbs-ubuntu"; then
+  fail "登记表里挂着但文件不存在，却被当成已安装"
+fi
+printf '通过：只认磁盘上的真实文件，不盲信登记表\n'
+unset LIST_SAYS_INSTALLED
+
 # 二、完整装好的底座要能被识别
 mkdir -p "$PROOT_ROOT/zbs-ubuntu/rootfs/etc"
 if ! proot_distro_alias_exists "zbs-ubuntu"; then
@@ -56,31 +72,34 @@ if ! proot_distro_alias_exists "zbs-ubuntu"; then
 fi
 printf '通过：完整底座能被识别\n'
 
-# 三、重装前先清掉空壳，再走安装命令
+# 三、重装前先清掉残留，并且要注销底层工具的登记
 rm -rf "$PROOT_ROOT/zbs-ubuntu/rootfs"
 : > "$CALL_LOG"
+export LIST_SAYS_INSTALLED=1
 ensure_ubuntu >/dev/null 2>&1
+unset LIST_SAYS_INSTALLED
 if [ -e "$PROOT_ROOT/zbs-ubuntu/rootfs" ]; then
   fail "空壳没有被清理"
 fi
+grep -q 'proot-distro remove' "$CALL_LOG" \
+  || fail "没有注销底层工具里的残留登记，实际记录：$(cat "$CALL_LOG" 2>/dev/null)"
 grep -q 'proot-distro install ubuntu' "$CALL_LOG" \
   || fail "没有执行安装命令，实际记录：$(cat "$CALL_LOG" 2>/dev/null)"
-printf '通过：重装前清理空壳，并执行了安装命令\n'
+printf '通过：重装前清理残留并注销登记，然后执行安装\n'
 
-# 四、探测失败只提醒、不拦路：仍会尝试下载
-#    （开着代理、分应用分流的环境里，探测方式可能和真实下载不一致，不能一棒子打死）
+# 四、救援机制失败（镜像没备好）时不能阻断安装，要继续让安装器自己试
 rm -rf "$PROOT_ROOT/zbs-ubuntu"
 : > "$CALL_LOG"
 code=0
 output="$(NETWORK_DOWN=1 ensure_ubuntu 2>&1)" || code=$?
-[ "$code" -eq 0 ] || fail "探测失败不该拦路，实际退出码 $code，输出：$output"
+[ "$code" -eq 0 ] || fail "救援失败不该阻断安装，实际退出码 $code，输出：$output"
 grep -q 'proot-distro install' "$CALL_LOG" \
-  || fail "探测失败后没有继续尝试下载，实际记录：$(cat "$CALL_LOG" 2>/dev/null)"
-printf '%s' "$output" | grep -q '仍会尝试下载' \
-  || fail "没有给出"仍会尝试下载"的提示，实际输出：$output"
-printf '通过：探测失败只提醒，仍会尝试下载\n'
+  || fail "救援失败后没有继续安装，实际记录：$(cat "$CALL_LOG" 2>/dev/null)"
+printf '%s' "$output" | grep -q '交给安装器自己下载' \
+  || fail "没有说明会交给安装器继续尝试，实际输出：$output"
+printf '通过：救援机制失败时仍会继续安装\n'
 
-# 五、真实下载失败时才报错，并且要说清楚怎么办
+# 五、安装两次都失败时才报错，并且要说清楚下一步怎么办
 cat > "$root/bin/proot-distro" <<'FAKE'
 #!/usr/bin/env bash
 printf 'proot-distro %s\n' "$*" >> "$CALL_LOG"
@@ -95,9 +114,13 @@ rm -rf "$PROOT_ROOT/zbs-ubuntu"
 : > "$CALL_LOG"
 code=0
 output="$(NETWORK_DOWN=1 ensure_ubuntu 2>&1)" || code=$?
-[ "$code" -ne 0 ] || fail "下载失败却没有报错"
-printf '%s' "$output" | grep -q '下载中断' \
-  || fail "下载失败的提示不明确，实际输出：$output"
-printf '通过：下载失败时给出明确指引\n'
+[ "$code" -ne 0 ] || fail "安装失败却没有报错"
+printf '%s' "$output" | grep -q '没装成' \
+  || fail "安装失败的提示不明确，实际输出：$output"
+install_times="$(grep -c 'proot-distro install' "$CALL_LOG")"
+[ "$install_times" -ge 2 ] || fail "失败后没有自动重试，实际安装次数 $install_times"
+printf '%s' "$output" | grep -qE '救急办法|代理是否覆盖' \
+  || fail "没有给出下一步的指引，实际输出：$output"
+printf '通过：安装失败会自动重试，并给出下一步指引\n'
 
 printf '\n运行底座安装验收：全部通过\n'

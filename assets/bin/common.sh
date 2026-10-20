@@ -202,8 +202,13 @@ ensure_termux_tools() {
   if [ "$missing" -eq 1 ]; then
     repair_termux_packages
     log "补齐终端基础工具"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
-      curl wget unzip zip tar jq python proot-distro git openssl-tool
+    # 这里必须判失败：否则工具没装上，后面每一条命令都会"找不到"，
+    # 报出来的错完全看不出根因。
+    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        curl wget unzip zip tar jq python proot-distro git openssl-tool; then
+      die "终端基础工具没装上（多半是软件源或网络问题）。请确认网络后重新点一次部署；如果反复失败，可以在 ZeroTermux 里手动执行下面这条，成功后再回来：
+apt-get update && apt-get install -y curl wget unzip zip tar jq python proot-distro git openssl-tool"
+    fi
   fi
 }
 
@@ -478,48 +483,95 @@ prefetch_rootfs() {
   return 1
 }
 
-# 装运行底座（ubuntu / debian）都要从 GitHub 下载几十兆的镜像，
-# 手机网络到 GitHub 不稳时会报 Errno 103（连接被掐断）。
+# 只查底层工具的登记表，不碰磁盘。
+# 用来发现"登记还在、文件已经没了"这种鬼状态——它会让底层工具报"同名实例已存在"。
+proot_distro_registered() {
+  local alias="$1"
+  proot-distro list 2>/dev/null \
+    | awk -v alias="$alias" '$1 == alias || $1 == alias ":" { found = 1 } END { exit !found }'
+}
+
+# 磁盘空间预检。
+# 一张系统镜像解开要占几百兆，空间不够时后面会发生各种看不懂的失败。
+check_free_space() {
+  local need_mb="${1:-900}"
+  local target="${2:-$PREFIX}"
+  local avail
+  avail="$(df -Pm "$target" 2>/dev/null | awk 'NR == 2 { print $4 }')"
+  [[ "$avail" =~ ^[0-9]+$ ]] || return 0
+  if [ "$avail" -lt "$need_mb" ]; then
+    die "存储空间不够：这一步至少需要 ${need_mb} MB 可用，现在只剩 ${avail} MB。请先清理手机存储（相册、视频、其他应用缓存），再重新点一次部署"
+  fi
+  log "可用存储 ${avail} MB，够用"
+}
+
+# 装运行底座。这里是整个部署里最容易翻车的一步，所以做了五层兜底：
+#   一、清磁盘残留、二、清底层工具的登记残留、三、空间预检、
+#   四、尽量把镜像提前备到本地、五、失败自动重试一次并给出针对性指引。
 install_proot_distro() {
   local distro="$1"
   local alias="$2"
   local label="$3"
   local root="$PROOT_ROOT/$alias"
+  local cleaned=0
 
-  # 上次下载中断会留下一个空壳目录，它会被误判成"已安装"，
-  # 于是后续每一步都失败。这里先把这个空壳清掉再重装。
+  # 一、清磁盘残留（下载中断留下的空壳）
   if [ -d "$root" ] && [ ! -e "$root/rootfs/etc" ]; then
     warn "发现上次没装完的${label}残留，先清理再重装"
     rm -rf "$root" 2>/dev/null || true
+    cleaned=1
   fi
+
+  # 二、清底层工具里的登记残留。
+  # 只删磁盘目录、不清登记的话，底层工具会报"同名实例已存在"，
+  # 然后无论点多少次都装不上——这正是最容易让人崩溃的那种状态。
+  if [ ! -e "$root/rootfs/etc" ] && proot_distro_registered "$alias"; then
+    warn "底层工具里还登记着${label}，但文件已经不完整，先把这条登记注销"
+    proot-distro remove "$alias" >/dev/null 2>&1 || true
+    proot-distro reset "$alias" >/dev/null 2>&1 || true
+    cleaned=1
+  fi
+  if [ "$cleaned" = "1" ]; then
+    log "残留已清理干净"
+  fi
+
+  # 三、空间预检
+  check_free_space 900 "$PREFIX"
 
   log "安装${label}运行底座"
-  warn "需要从 GitHub 下载运行镜像，请保持屏幕常亮、网络稳定"
-  if ! network_reachable "github.com"; then
-    # 探测只是提前打个招呼，不拦路：
-    # 开着代理、分应用分流、或者探测方式被拦的环境下都可能误判，
-    # 到底能不能下载，交给下载器自己判断（它内部会重试多次）。
-    warn "提前探测没连上 GitHub，仍会尝试下载；若失败请检查网络、确认 ZeroTermux 也在代理范围内，或改用手机流量"
-  fi
+  warn "这一步要从网上下载运行镜像，请保持屏幕常亮、网络稳定"
 
-  # 尽量先把镜像备到本地缓存：缓存命中、或从手机下载目录捡、或自己多源续传。
-  # 只要这一步成功，后面的安装就不再依赖终端能不能连上 GitHub。
+  # 四、尽量提前把镜像备到本地：缓存命中 / 从手机下载目录认领 / 多源续传。
   if prefetch_rootfs "$distro" "$label"; then
     log "镜像已备好，开始安装"
   else
     warn "没能提前备好镜像，交给安装器自己下载（它会重试多次）"
   fi
 
-  if ! proot-distro install "$distro" --override-alias "$alias"; then
-    local info url
-    info="$(proot_distro_rootfs_info "$distro" 2>/dev/null || true)"
-    url="$(printf '%s' "$info" | sed -n '1p')"
-    if [ -n "$url" ]; then
-      die "${label}运行底座下载失败。救急办法：用手机浏览器打开下面这个地址下载（浏览器一般能走代理），下完不用移动文件，直接回来再点一次部署，程序会自动从下载目录里把它捡起来：
-$url"
+  # 五、安装，失败先清理再重试一次
+  local attempt
+  for attempt in 1 2; do
+    if proot-distro install "$distro" --override-alias "$alias"; then
+      ok "${label}运行底座安装完成"
+      return 0
     fi
-    die "${label}运行底座下载失败。请确认网络、确认 ZeroTermux 在代理范围内（很多代理默认只代理浏览器）、或改用手机流量后重试"
+    if [ "$attempt" = "1" ]; then
+      warn "第一次没装成，先清干净再重试一次"
+      rm -rf "$root" 2>/dev/null || true
+      proot-distro remove "$alias" >/dev/null 2>&1 || true
+      proot-distro reset "$alias" >/dev/null 2>&1 || true
+    fi
+  done
+
+  # 两次都失败：给出最具体的下一步
+  local info url
+  info="$(proot_distro_rootfs_info "$distro" 2>/dev/null || true)"
+  url="$(printf '%s' "$info" | sed -n '1p')"
+  if [ -n "$url" ]; then
+    die "${label}运行底座没装成。救急办法：用手机浏览器打开下面这个地址下载（浏览器一般能走代理），下完不用移动文件，直接回来再点一次部署，程序会自动从手机的下载文件夹里把它捡起来：
+$url"
   fi
+  die "${label}运行底座没装成。如果日志里出现「manifest」「layer」「image config」这类字样，说明这台手机的底层工具是从镜像仓库拉取的，必须让终端本身能访问外网：请检查代理是否覆盖 ZeroTermux（很多代理默认只代理浏览器），或者改用手机流量后重试"
 }
 
 ensure_ubuntu() {
@@ -541,13 +593,14 @@ ensure_debian() {
 proot_distro_alias_exists() {
   local alias="$1"
   local root="$PROOT_ROOT/$alias"
-  # 装好的底座里一定有 rootfs/etc；下载中断只留空壳，不能当成已安装。
+  # 只有真正解压出系统文件、或者真的能登进去，才算装好。
+  # 绝不能只看底层工具的登记表：下载中断同样会留下登记，
+  # 于是变成"看起来装着、一登录就崩、想重装又报同名已存在"的死循环。
   if [ -d "$root/rootfs" ] && [ -e "$root/rootfs/etc" ]; then
     return 0
   fi
   proot-distro login "$alias" -- /bin/true >/dev/null 2>&1 && return 0
-  proot-distro list 2>/dev/null \
-    | awk -v alias="$alias" '$1 == alias || $1 == alias ":" { found = 1 } END { exit !found }'
+  return 1
 }
 
 ubuntu_shell() {

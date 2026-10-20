@@ -17,6 +17,8 @@ PY
   fi
 
   ensure_ubuntu
+  # AstrBot 的 Python 依赖不小，空间不够会在装到一半时以各种看不懂的方式失败。提前拦下来。
+  check_free_space 2500 "$PREFIX"
 
   echo "============================================================"
   echo "部署 AstrBot v$ASTRBOT_VERSION"
@@ -68,7 +70,7 @@ PY
       \"astrbot==$ASTRBOT_VERSION\" || \
     \"\$PIP\" install --prefer-binary --index-url https://pypi.org/simple \
       \"astrbot==$ASTRBOT_VERSION\"
-  " || die "AstrBot 安装失败"
+  " || die "AstrBot 本体没装上（网络或软件源问题）。请确认网络后重新点一次部署；程序已经内置了国内加速源和官方源两条路，反复失败多半是终端本身连不上外网：检查代理是否覆盖 ZeroTermux，或改用手机流量再试"
 
   installed="$(ubuntu_shell '
     /root/astrbot-venv/bin/python - <<"PY"

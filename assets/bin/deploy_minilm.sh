@@ -10,6 +10,8 @@ minilm_pid_file() {
 
 deploy_minilm() {
   ensure_ubuntu
+  # 向量服务要装一整套推理库、还要放模型，空间不够会在半路失败。提前拦下来。
+  check_free_space 2000 "$PREFIX"
   local model_dir
   model_dir="$(minilm_dir)"
 
@@ -75,7 +77,7 @@ PY
       sentence-transformers==6.1.0 || \
     /root/minilm-venv/bin/pip install --prefer-binary \
       --index-url https://pypi.org/simple sentence-transformers==6.1.0
-  ' || die "MiniLM 依赖安装失败"
+  ' || die "MiniLM 依赖没装上（网络或软件源问题）。这一堆推理库体积很大，请确认网络稳定、空间充足后重试；反复失败多半是终端连不上外网，检查代理是否覆盖 ZeroTermux，或改用手机流量"
 
   log "下载模型并保存为离线目录"
   if ! ubuntu_shell "
