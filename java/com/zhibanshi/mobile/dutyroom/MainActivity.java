@@ -16,6 +16,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PermissionInfo;
+import android.content.res.AssetFileDescriptor;
 import android.content.res.AssetManager;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -755,28 +756,19 @@ public class MainActivity extends Activity {
                 }
                 relativePath = "logs/astrbot/" + instanceId + "/" + date + ".log";
             }
-            long size = store.documentSize(relativePath);
-            if (size == 0) {
+            // 一次把"定位文件、取大小、读尾部"全部做完。
+            // 以前这里先查一次大小、再读尾部（读尾部时又查一次大小、又扫一遍目录），
+            // 日志一大就卡成幻灯片。
+            DocumentStore.LogTail log = store.readLogTail(relativePath, LOG_TAIL_BYTES);
+            if (log == null || log.text == null || log.text.isEmpty()) {
                 return "当天暂无日志（日志目录或文件可能已被删除，服务产生新输出后会自动重建）";
             }
-            String value;
-            boolean truncated = false;
-            if (size > LOG_TAIL_BYTES) {
-                // 大文件只取尾巴，避免把整个日志读进内存再塞给 WebView。
-                value = store.readTailText(relativePath, LOG_TAIL_BYTES);
-                truncated = true;
-            } else {
-                value = store.readText(relativePath);
-            }
-            if (value == null || value.isEmpty()) {
-                return "当天暂无日志（日志目录或文件可能已被删除，服务产生新输出后会自动重建）";
-            }
-            if (truncated) {
+            if (log.truncated) {
                 return sanitizeLogText("【日志过大，仅显示最后 "
                         + (LOG_TAIL_BYTES / 1024) + " KB，完整内容在部署文件夹的 logs 目录里】\n"
-                        + value);
+                        + log.text);
             }
-            return sanitizeLogText(value);
+            return sanitizeLogText(log.text);
         } catch (Exception exc) {
             return "日志读取失败：" + exc.getClass().getSimpleName()
                     + (exc.getMessage() == null ? "" : " - " + exc.getMessage());
@@ -846,24 +838,18 @@ public class MainActivity extends Activity {
                 break;
             }
             String relativePath = "logs/astrbot/" + entry.name + "/" + date + ".log";
-            long size = store.documentSize(relativePath);
-            if (size <= 0) {
+            DocumentStore.LogTail log =
+                    store.readLogTail(relativePath, LOG_AGGREGATE_PER_INSTANCE_BYTES);
+            if (log == null || log.text == null || log.text.isEmpty()) {
                 continue;
             }
-            String value;
-            if (size > LOG_AGGREGATE_PER_INSTANCE_BYTES) {
-                value = store.readTailText(relativePath, LOG_AGGREGATE_PER_INSTANCE_BYTES);
+            if (log.truncated) {
                 truncated = true;
-            } else {
-                value = store.readText(relativePath);
-            }
-            if (value == null || value.isEmpty()) {
-                continue;
             }
             instances++;
             result.append("========== ").append(entry.name).append(" ==========\n");
-            result.append(value);
-            if (!value.endsWith("\n")) {
+            result.append(log.text);
+            if (!log.text.endsWith("\n")) {
                 result.append('\n');
             }
             result.append('\n');
@@ -1544,12 +1530,72 @@ public class MainActivity extends Activity {
             return null;
         }
 
-        long documentSize(String relativePath) throws IOException {
+        /** 读日志的结果：正文、文件大小、以及是不是只给了尾部。 */
+        static final class LogTail {
+            final String text;
+            final long size;
+            final boolean truncated;
+
+            LogTail(String text, long size, boolean truncated) {
+                this.text = text;
+                this.size = size;
+                this.truncated = truncated;
+            }
+        }
+
+        /**
+         * 一次把"定位文件、取大小、读尾部"全部做完。
+         * 日志一大就卡，主要是两个原因，这里都避开了：
+         *   一、反复扫描目录树——定位一次就复用，不再每次都从根目录重新找；
+         *   二、为了拿文件大小把整个文件读一遍——改用文件描述符直接问长度。
+         */
+        LogTail readLogTail(String relativePath, int maxBytes) throws IOException {
             Child child = findExistingChild(rootId, normalize(relativePath));
             if (child == null || child.directory) {
-                return -1L;
+                return null;
             }
             Uri documentUri = documentUri(child.id);
+            long size = documentSize(documentUri);
+            if (size == 0) {
+                return new LogTail("", 0L, false);
+            }
+            try (InputStream input = resolver.openInputStream(documentUri)) {
+                if (input == null) {
+                    return null;
+                }
+                byte[] bytes;
+                boolean trimmed;
+                if (size < 0) {
+                    // 拿不到总长度：只能读一遍，但只留尾部，内存占用仍然只有上限那么多。
+                    bytes = readTailWhenSizeUnknown(input, maxBytes);
+                    trimmed = true;
+                } else if (size > maxBytes) {
+                    skipBytes(input, size - maxBytes);
+                    bytes = readAtMost(input, maxBytes);
+                    trimmed = true;
+                } else {
+                    bytes = readAtMost(input, maxBytes);
+                    trimmed = false;
+                }
+                return new LogTail(trimLeadingUtf8(bytes, trimmed), size, trimmed);
+            }
+        }
+
+        /**
+         * 取文件大小：先问文件描述符（最快），再查文档信息，都不行就返回未知。
+         * 这里绝不打开输入流去数字节——那等于把整个日志读一遍，正是卡顿的来源。
+         */
+        private long documentSize(Uri documentUri) {
+            try (AssetFileDescriptor descriptor =
+                    resolver.openAssetFileDescriptor(documentUri, "r")) {
+                if (descriptor != null) {
+                    long length = descriptor.getLength();
+                    if (length >= 0) {
+                        return length;
+                    }
+                }
+            } catch (Exception ignored) {
+            }
             try (Cursor cursor = resolver.query(
                     documentUri,
                     new String[]{DocumentsContract.Document.COLUMN_SIZE},
@@ -1562,57 +1608,73 @@ public class MainActivity extends Activity {
                 }
             } catch (Exception ignored) {
             }
-            try (InputStream input = resolver.openInputStream(documentUri)) {
-                if (input == null) {
-                    return -1L;
-                }
-                byte[] buffer = new byte[8192];
-                long total = 0L;
-                int read;
-                while ((read = input.read(buffer)) != -1) {
-                    total += read;
-                }
-                return total;
-            }
+            return -1L;
         }
 
         /**
-         * 只读文件尾部 maxBytes 字节。
-         * 日志可以长到几十 MB，全量读取会把 WebView 卡死，所以这里永远只取尾巴。
+         * 跳过开头的 count 个字节。
+         * 优先让流自己跳（一次到位）；万一这条流不支持跳跃，就整块整块地读掉，
+         * 绝不一个字节一个字节地读——那会把几十兆的日志变成几百万次读取，必卡。
          */
-        String readTailText(String relativePath, int maxBytes) throws IOException {
-            Child child = findExistingChild(rootId, normalize(relativePath));
-            if (child == null || child.directory) {
-                return null;
-            }
-            try (InputStream input = resolver.openInputStream(documentUri(child.id))) {
-                if (input == null) {
-                    return null;
-                }
-                long skipped = 0L;
-                long remaining = Math.max(0L, documentSize(relativePath) - maxBytes);
-                while (remaining > 0) {
-                    long step = input.skip(remaining);
-                    if (step <= 0) {
-                        int single = input.read();
-                        if (single < 0) {
-                            break;
-                        }
-                        remaining--;
-                        skipped++;
-                        continue;
-                    }
+        private static void skipBytes(InputStream input, long count) throws IOException {
+            long remaining = count;
+            byte[] buffer = new byte[64 * 1024];
+            while (remaining > 0) {
+                long step = input.skip(remaining);
+                if (step > 0) {
                     remaining -= step;
-                    skipped += step;
+                    continue;
                 }
-                ByteArrayOutputStream output = new ByteArrayOutputStream();
-                byte[] buffer = new byte[8192];
-                int read;
-                while ((read = input.read(buffer)) != -1) {
-                    output.write(buffer, 0, read);
+                int want = (int) Math.min(remaining, buffer.length);
+                int read = input.read(buffer, 0, want);
+                if (read <= 0) {
+                    return;
                 }
-                return trimLeadingUtf8(output.toByteArray(), skipped > 0);
+                remaining -= read;
             }
+        }
+
+        /** 最多读 limit 个字节，超过就停。 */
+        private static byte[] readAtMost(InputStream input, int limit) throws IOException {
+            ByteArrayOutputStream output = new ByteArrayOutputStream(
+                    Math.max(1024, Math.min(limit, 64 * 1024)));
+            byte[] buffer = new byte[8192];
+            while (output.size() < limit) {
+                int want = Math.min(buffer.length, limit - output.size());
+                int read = input.read(buffer, 0, want);
+                if (read <= 0) {
+                    break;
+                }
+                output.write(buffer, 0, read);
+            }
+            return output.toByteArray();
+        }
+
+        /** 不知道总长度时，边读边丢，只留下最后 limit 个字节。 */
+        private static byte[] readTailWhenSizeUnknown(InputStream input, int limit)
+                throws IOException {
+            int capacity = limit > 0 ? limit : 1024;
+            byte[] ring = new byte[capacity];
+            int filled = 0;
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) > 0) {
+                if (read >= capacity) {
+                    System.arraycopy(buffer, read - capacity, ring, 0, capacity);
+                    filled = capacity;
+                    continue;
+                }
+                int overflow = filled + read - capacity;
+                if (overflow > 0) {
+                    System.arraycopy(ring, overflow, ring, 0, filled - overflow);
+                    filled -= overflow;
+                }
+                System.arraycopy(buffer, 0, ring, filled, read);
+                filled += read;
+            }
+            byte[] result = new byte[filled];
+            System.arraycopy(ring, 0, result, 0, filled);
+            return result;
         }
 
         private Uri documentUri(String documentId) {
